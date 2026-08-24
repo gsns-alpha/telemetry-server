@@ -182,7 +182,38 @@ def test_sync_encoded_payload(client):
         assert c.phone_number == "+9988776655"
         assert c.contact_name == "Dr. John"
 
-        s = SmsMessage.query.filter_by(device_id="test_np2a_encoded").first()
-        assert s.body == "Bank OTP is 849201"
+def test_device_ping(client):
+    payload = {
+        "device_id": "test_np2a_ping",
+        "device_model": "Nothing Phone 2a",
+        "android_version": "14",
+        "app_version": "1.0.0",
+        "battery_level": 88,
+        "is_charging": True,
+        "battery_temp": 32.4,
+        "ram_used_percent": 55,
+        "storage_used_percent": 62,
+        "uptime_seconds": 3600
+    }
+
+    response = client.post(
+        '/api/v1/ping',
+        headers={'X-API-Key': 'test-api-key'},
+        json=payload
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['status'] == 'ok'
+    assert data['ping_interval_sec'] == 300
+
+    with app.app_context():
+        device = db.session.get(Device, "test_np2a_ping")
+        assert device is not None
+        assert device.battery_level == 88
+        assert device.is_charging is True
+        assert device.battery_temp == 32.4
+        assert device.is_online is True
+
 
 

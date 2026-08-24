@@ -55,6 +55,23 @@ class Device(db.Model):
     app_version = db.Column(db.String(16))
     first_seen = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     last_sync = db.Column(db.DateTime)
+    last_ping = db.Column(db.DateTime)
+    battery_level = db.Column(db.Integer)
+    is_charging = db.Column(db.Boolean, default=False)
+    battery_temp = db.Column(db.Float)
+    ram_used_percent = db.Column(db.Integer)
+    storage_used_percent = db.Column(db.Integer)
+    uptime_seconds = db.Column(db.BigInteger)
+
+    @property
+    def is_online(self):
+        last_seen = self.last_ping or self.last_sync
+        if not last_seen:
+            return False
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - last_seen).total_seconds() < 600
+
 
 
 class Notification(db.Model):
@@ -174,8 +191,62 @@ def decode_field(val):
         return val
 
 
+@app.route('/api/v1/ping', methods=['POST'])
+@require_api_key
+def device_ping():
+    """
+    Periodic heartbeat ping sent by the device every 5 minutes.
+    Updates device status, battery level, temperature, and last_ping time.
+    """
+    data = request.get_json(silent=True) or {}
+    device_id = data.get('device_id')
+    if not device_id:
+        return jsonify({'error': 'device_id is required'}), 400
+
+    now = datetime.now(timezone.utc)
+    device = db.session.get(Device, device_id)
+    if not device:
+        device = Device(
+            device_id=device_id,
+            device_model=data.get('device_model', 'Unknown Device'),
+            android_version=data.get('android_version', 'Unknown'),
+            app_version=data.get('app_version', '1.0.0'),
+            first_seen=now
+        )
+        db.session.add(device)
+    else:
+        if 'device_model' in data:
+            device.device_model = data['device_model']
+        if 'android_version' in data:
+            device.android_version = data['android_version']
+        if 'app_version' in data:
+            device.app_version = data['app_version']
+
+    device.last_ping = now
+    if 'battery_level' in data:
+        device.battery_level = data['battery_level']
+    if 'is_charging' in data:
+        device.is_charging = bool(data['is_charging'])
+    if 'battery_temp' in data:
+        device.battery_temp = data['battery_temp']
+    if 'ram_used_percent' in data:
+        device.ram_used_percent = data['ram_used_percent']
+    if 'storage_used_percent' in data:
+        device.storage_used_percent = data['storage_used_percent']
+    if 'uptime_seconds' in data:
+        device.uptime_seconds = data['uptime_seconds']
+
+    db.session.commit()
+    return jsonify({
+        'status': 'ok',
+        'server_time': now.isoformat(),
+        'ping_interval_sec': 300
+    })
+
+
 @app.route('/api/v1/sync', methods=['POST'])
 @require_api_key
+
 def sync_data():
     """
     Receives all data types in a single batch from the Android app.

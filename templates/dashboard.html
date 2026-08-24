@@ -51,9 +51,8 @@
                 <th>Device ID</th>
                 <th>Model</th>
                 <th>Android OS</th>
-                <th>App Ver</th>
-                <th>First Seen</th>
-                <th>Last Sync</th>
+                <th>Battery & Temp</th>
+                <th>Last Seen / Ping</th>
                 <th>Status</th>
             </tr>
         </thead>
@@ -62,15 +61,32 @@
             <tr>
                 <td><code>{{ d.device_id }}</code></td>
                 <td><strong>{{ d.device_model }}</strong></td>
-                <td>Android {{ d.android_version }}</td>
-                <td>v{{ d.app_version }}</td>
-                <td class="time-text">{{ d.first_seen.strftime('%Y-%m-%d %H:%M') if d.first_seen else '-' }}</td>
-                <td class="time-text">{{ d.last_sync.strftime('%Y-%m-%d %H:%M:%S') if d.last_sync else '-' }}</td>
-                <td><span class="badge badge-green">Online</span></td>
+                <td>Android {{ d.android_version }} (v{{ d.app_version }})</td>
+                <td>
+                    {% if d.battery_level is not none %}
+                    <span>{{ '⚡' if d.is_charging else '🔋' }} {{ d.battery_level }}%</span>
+                    {% if d.battery_temp %}
+                    <span style="color: var(--text-secondary); font-size: 11px;">({{ d.battery_temp }}°C)</span>
+                    {% endif %}
+                    {% else %}
+                    <span style="color: var(--text-secondary);">-</span>
+                    {% endif %}
+                </td>
+                <td class="time-text">
+                    {{ (d.last_ping or d.last_sync).strftime('%Y-%m-%d %H:%M:%S') if (d.last_ping or d.last_sync) else '-' }}
+                </td>
+                <td>
+                    {% if d.is_online %}
+                    <span class="badge badge-green">Online</span>
+                    {% else %}
+                    <span class="badge" style="background: rgba(140, 149, 159, 0.15); color: #8b949e; border: 1px solid #30363d;">Offline</span>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+
     {% else %}
     <div class="empty-state">
         <p>No devices have checked in yet. Complete the setup wizard in the Android app to connect.</p>
