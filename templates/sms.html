@@ -39,7 +39,8 @@
         <thead>
             <tr>
                 <th style="width: 170px;">Timestamp</th>
-                <th style="width: 120px;">Direction</th>
+                <th style="width: 110px;">Direction</th>
+                <th style="width: 100px;">SIM</th>
                 <th style="width: 220px;">Contact / Number</th>
                 <th>Message Content</th>
             </tr>
@@ -49,13 +50,19 @@
             <tr>
                 <td class="time-text">{{ m.occurred_at|to_ist if m.occurred_at else '-' }}</td>
                 <td>
-
                     {% if m.sms_type == 'received' %}
                     <span class="badge badge-green">Received</span>
                     {% elif m.sms_type == 'sent' %}
                     <span class="badge badge-blue">Sent</span>
                     {% else %}
                     <span class="badge">{{ m.sms_type }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if m.sim_slot %}
+                    <span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3);">{{ m.sim_slot }}</span>
+                    {% else %}
+                    <span style="color: var(--text-secondary); font-size: 11px;">—</span>
                     {% endif %}
                 </td>
                 <td>
@@ -69,6 +76,7 @@
             {% endfor %}
         </tbody>
     </table>
+
 
     <!-- Pagination -->
     {% if pagination.pages > 1 %}

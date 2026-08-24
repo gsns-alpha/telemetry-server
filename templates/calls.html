@@ -38,7 +38,8 @@
         <thead>
             <tr>
                 <th style="width: 170px;">Timestamp</th>
-                <th style="width: 130px;">Call Type</th>
+                <th style="width: 120px;">Call Type</th>
+                <th style="width: 100px;">SIM</th>
                 <th style="width: 220px;">Contact / Name</th>
                 <th style="width: 180px;">Phone Number</th>
                 <th>Duration</th>
@@ -49,7 +50,6 @@
             <tr>
                 <td class="time-text">{{ c.occurred_at|to_ist if c.occurred_at else '-' }}</td>
                 <td>
-
                     {% if c.call_type == 'incoming' %}
                     <span class="badge badge-green">Incoming</span>
                     {% elif c.call_type == 'outgoing' %}
@@ -60,6 +60,13 @@
                     <span class="badge badge-amber">Rejected</span>
                     {% else %}
                     <span class="badge">{{ c.call_type }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if c.sim_slot %}
+                    <span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3);">{{ c.sim_slot }}</span>
+                    {% else %}
+                    <span style="color: var(--text-secondary); font-size: 11px;">—</span>
                     {% endif %}
                 </td>
                 <td><strong>{{ c.contact_name or 'Unknown Contact' }}</strong></td>
@@ -75,6 +82,7 @@
             </tr>
             {% endfor %}
         </tbody>
+
     </table>
 
     <!-- Pagination -->
