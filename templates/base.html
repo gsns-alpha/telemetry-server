@@ -4,27 +4,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}DevicePulse — Telemetry Console{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2358a6ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3Cpath d='M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14'/%3E%3C/svg%3E">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-primary: #0d1117;
-            --bg-secondary: #161b22;
-            --bg-card: #21262d;
-            --border-color: #30363d;
-            --text-primary: #f0f6fc;
-            --text-secondary: #8b949e;
-            --accent-green: #3fb950;
-            --accent-green-dim: rgba(63, 185, 80, 0.15);
-            --accent-blue: #58a6ff;
-            --accent-blue-dim: rgba(88, 166, 255, 0.15);
-            --accent-amber: #d29922;
-            --accent-amber-dim: rgba(210, 153, 34, 0.15);
-            --accent-red: #f85149;
-            --accent-red-dim: rgba(248, 81, 73, 0.15);
-            --accent-purple: #bc8cff;
+            --bg-primary: #0b0f19;
+            --bg-secondary: #111827;
+            --bg-card: #1f2937;
+            --border-color: #374151;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --accent-primary: #38bdf8;
+            --accent-primary-dim: rgba(56, 189, 248, 0.15);
+            --accent-green: #34d399;
+            --accent-green-dim: rgba(52, 211, 153, 0.15);
+            --accent-blue: #38bdf8;
+            --accent-blue-dim: rgba(56, 189, 248, 0.15);
+            --accent-amber: #fbbf24;
+            --accent-amber-dim: rgba(251, 191, 36, 0.15);
+            --accent-red: #f87171;
+            --accent-red-dim: rgba(248, 113, 113, 0.15);
+            --accent-purple: #c084fc;
         }
 
         * {
@@ -69,24 +72,28 @@
         }
 
         .brand-icon {
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, #2ea043, #3fb950);
-            border-radius: 8px;
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            color: #ffffff;
         }
 
         .brand-text h2 {
             font-size: 16px;
-            font-weight: 600;
+            font-weight: 700;
+            letter-spacing: -0.3px;
         }
 
         .brand-text span {
             font-size: 11px;
-            color: var(--text-secondary);
+            color: var(--accent-primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
             display: block;
         }
 
@@ -117,11 +124,12 @@
         }
 
         .nav-item.active a {
-            color: var(--text-primary);
-            background-color: var(--accent-green-dim);
-            border: 1px solid rgba(63, 185, 80, 0.3);
-            color: var(--accent-green);
+            color: var(--accent-primary);
+            background-color: var(--accent-primary-dim);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            font-weight: 600;
         }
+
 
         .sidebar-footer {
             padding-top: 16px;
@@ -390,12 +398,18 @@
     <!-- Sidebar -->
     <aside class="sidebar">
         <a href="{{ url_for('dashboard') }}" class="brand">
-            <div class="brand-icon">📡</div>
+            <div class="brand-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="2"></circle>
+                    <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"></path>
+                </svg>
+            </div>
             <div class="brand-text">
                 <h2>DevicePulse</h2>
                 <span>Telemetry Console</span>
             </div>
         </a>
+
 
 
         <ul class="nav-links">
