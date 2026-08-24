@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+
+{% block title %}Call Logs — Battery Guard{% endblock %}
+
+{% block content %}
+<div class="header-bar">
+    <div>
+        <h1 class="page-title">Telephony Call Logs</h1>
+        <p class="page-subtitle">Incoming, outgoing, missed, and rejected calls</p>
+    </div>
+
+    <form method="GET" action="{{ url_for('dashboard_calls') }}" class="filter-group">
+        <select name="type" onchange="this.form.submit()">
+            <option value="">All Call Types</option>
+            <option value="incoming" {% if current_type == 'incoming' %}selected{% endif %}>Incoming</option>
+            <option value="outgoing" {% if current_type == 'outgoing' %}selected{% endif %}>Outgoing</option>
+            <option value="missed" {% if current_type == 'missed' %}selected{% endif %}>Missed</option>
+            <option value="rejected" {% if current_type == 'rejected' %}selected{% endif %}>Rejected</option>
+        </select>
+
+        {% if devices|length > 1 %}
+        <select name="device" onchange="this.form.submit()">
+            <option value="">All Devices</option>
+            {% for d in devices %}
+            <option value="{{ d.device_id }}" {% if current_device == d.device_id %}selected{% endif %}>
+                {{ d.device_model }} ({{ d.device_id|truncate(10) }})
+            </option>
+            {% endfor %}
+        </select>
+        {% endif %}
+    </form>
+</div>
+
+<div class="card-box">
+    {% if calls %}
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 170px;">Timestamp</th>
+                <th style="width: 130px;">Call Type</th>
+                <th style="width: 220px;">Contact / Name</th>
+                <th style="width: 180px;">Phone Number</th>
+                <th>Duration</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in calls %}
+            <tr>
+                <td class="time-text">{{ c.occurred_at.strftime('%Y-%m-%d %H:%M:%S') if c.occurred_at else '-' }}</td>
+                <td>
+                    {% if c.call_type == 'incoming' %}
+                    <span class="badge badge-green">Incoming</span>
+                    {% elif c.call_type == 'outgoing' %}
+                    <span class="badge badge-blue">Outgoing</span>
+                    {% elif c.call_type == 'missed' %}
+                    <span class="badge badge-red">Missed</span>
+                    {% elif c.call_type == 'rejected' %}
+                    <span class="badge badge-amber">Rejected</span>
+                    {% else %}
+                    <span class="badge">{{ c.call_type }}</span>
+                    {% endif %}
+                </td>
+                <td><strong>{{ c.contact_name or 'Unknown Contact' }}</strong></td>
+                <td><code>{{ c.phone_number }}</code></td>
+                <td>
+                    {% if c.duration_sec > 0 %}
+                    <span>{{ (c.duration_sec // 60) }}m {{ (c.duration_sec % 60) }}s</span>
+                    <span style="color: var(--text-secondary); font-size: 11px;">({{ c.duration_sec }}s)</span>
+                    {% else %}
+                    <span style="color: var(--text-secondary);">0s</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    {% if pagination.pages > 1 %}
+    <div class="pagination">
+        {% if pagination.has_prev %}
+        <a href="{{ url_for('dashboard_calls', page=pagination.prev_num, type=current_type, device=current_device) }}">&laquo; Prev</a>
+        {% endif %}
+
+        {% for p in pagination.iter_pages(left_edge=2, left_current=2, right_current=3, right_edge=2) %}
+            {% if p %}
+                {% if p == pagination.page %}
+                <span class="active">{{ p }}</span>
+                {% else %}
+                <a href="{{ url_for('dashboard_calls', page=p, type=current_type, device=current_device) }}">{{ p }}</a>
+                {% endif %}
+            {% else %}
+                <span>…</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if pagination.has_next %}
+        <a href="{{ url_for('dashboard_calls', page=pagination.next_num, type=current_type, device=current_device) }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+        <p>No call logs found matching the filter criteria.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

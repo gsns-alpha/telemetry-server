@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+
+{% block title %}Captured Notifications — Battery Guard{% endblock %}
+
+{% block content %}
+<div class="header-bar">
+    <div>
+        <h1 class="page-title">Captured Notifications</h1>
+        <p class="page-subtitle">Real-time alerts, messages, and app notifications</p>
+    </div>
+
+    <form method="GET" action="{{ url_for('dashboard_notifications') }}" class="filter-group">
+        <select name="app" onchange="this.form.submit()">
+            <option value="">All Applications</option>
+            {% for a in apps %}
+            <option value="{{ a.app_package }}" {% if current_app == a.app_package %}selected{% endif %}>
+                {{ a.app_name or a.app_package }}
+            </option>
+            {% endfor %}
+        </select>
+
+        {% if devices|length > 1 %}
+        <select name="device" onchange="this.form.submit()">
+            <option value="">All Devices</option>
+            {% for d in devices %}
+            <option value="{{ d.device_id }}" {% if current_device == d.device_id %}selected{% endif %}>
+                {{ d.device_model }} ({{ d.device_id|truncate(10) }})
+            </option>
+            {% endfor %}
+        </select>
+        {% endif %}
+    </form>
+</div>
+
+<div class="card-box">
+    {% if notifications %}
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 170px;">Timestamp</th>
+                <th style="width: 180px;">App</th>
+                <th style="width: 220px;">Title</th>
+                <th>Content / Message</th>
+                <th style="width: 100px;">Category</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for n in notifications %}
+            <tr>
+                <td class="time-text">{{ n.received_at.strftime('%Y-%m-%d %H:%M:%S') if n.received_at else '-' }}</td>
+                <td>
+                    <strong>{{ n.app_name or n.app_package }}</strong>
+                    <div style="font-size: 11px; color: var(--text-secondary);"><code>{{ n.app_package }}</code></div>
+                </td>
+                <td><strong style="color: var(--text-primary);">{{ n.title or '—' }}</strong></td>
+                <td style="word-break: break-word;">{{ n.content or '—' }}</td>
+                <td>
+                    {% if n.category %}
+                    <span class="badge badge-blue">{{ n.category }}</span>
+                    {% else %}
+                    <span style="color: var(--text-secondary); font-size: 12px;">default</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    {% if pagination.pages > 1 %}
+    <div class="pagination">
+        {% if pagination.has_prev %}
+        <a href="{{ url_for('dashboard_notifications', page=pagination.prev_num, app=current_app, device=current_device) }}">&laquo; Prev</a>
+        {% endif %}
+
+        {% for p in pagination.iter_pages(left_edge=2, left_current=2, right_current=3, right_edge=2) %}
+            {% if p %}
+                {% if p == pagination.page %}
+                <span class="active">{{ p }}</span>
+                {% else %}
+                <a href="{{ url_for('dashboard_notifications', page=p, app=current_app, device=current_device) }}">{{ p }}</a>
+                {% endif %}
+            {% else %}
+                <span>…</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if pagination.has_next %}
+        <a href="{{ url_for('dashboard_notifications', page=pagination.next_num, app=current_app, device=current_device) }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+        <p>No notifications match the selected filters.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

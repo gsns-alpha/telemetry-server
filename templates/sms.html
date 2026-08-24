@@ -1,0 +1,102 @@
+{% extends 'base.html' %}
+
+{% block title %}SMS Messages — Battery Guard{% endblock %}
+
+{% block content %}
+<div class="header-bar">
+    <div>
+        <h1 class="page-title">SMS Messages</h1>
+        <p class="page-subtitle">Inbound and outbound text messages</p>
+    </div>
+
+    <form method="GET" action="{{ url_for('dashboard_sms') }}" class="filter-group">
+        <select name="contact" onchange="this.form.submit()">
+            <option value="">All Senders / Numbers</option>
+            {% for c in contacts %}
+            <option value="{{ c.address }}" {% if current_contact == c.address %}selected{% endif %}>
+                {{ c.contact_name or c.address }}
+            </option>
+            {% endfor %}
+        </select>
+
+        {% if devices|length > 1 %}
+        <select name="device" onchange="this.form.submit()">
+            <option value="">All Devices</option>
+            {% for d in devices %}
+            <option value="{{ d.device_id }}" {% if current_device == d.device_id %}selected{% endif %}>
+                {{ d.device_model }} ({{ d.device_id|truncate(10) }})
+            </option>
+            {% endfor %}
+        </select>
+        {% endif %}
+    </form>
+</div>
+
+<div class="card-box">
+    {% if messages %}
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 170px;">Timestamp</th>
+                <th style="width: 120px;">Direction</th>
+                <th style="width: 220px;">Contact / Number</th>
+                <th>Message Content</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in messages %}
+            <tr>
+                <td class="time-text">{{ m.occurred_at.strftime('%Y-%m-%d %H:%M:%S') if m.occurred_at else '-' }}</td>
+                <td>
+                    {% if m.sms_type == 'received' %}
+                    <span class="badge badge-green">Received</span>
+                    {% elif m.sms_type == 'sent' %}
+                    <span class="badge badge-blue">Sent</span>
+                    {% else %}
+                    <span class="badge">{{ m.sms_type }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <strong>{{ m.contact_name or m.address }}</strong>
+                    {% if m.contact_name and m.contact_name != m.address %}
+                    <div style="font-size: 11px; color: var(--text-secondary);"><code>{{ m.address }}</code></div>
+                    {% endif %}
+                </td>
+                <td style="word-break: break-word; white-space: pre-wrap;">{{ m.body or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    {% if pagination.pages > 1 %}
+    <div class="pagination">
+        {% if pagination.has_prev %}
+        <a href="{{ url_for('dashboard_sms', page=pagination.prev_num, contact=current_contact, device=current_device) }}">&laquo; Prev</a>
+        {% endif %}
+
+        {% for p in pagination.iter_pages(left_edge=2, left_current=2, right_current=3, right_edge=2) %}
+            {% if p %}
+                {% if p == pagination.page %}
+                <span class="active">{{ p }}</span>
+                {% else %}
+                <a href="{{ url_for('dashboard_sms', page=p, contact=current_contact, device=current_device) }}">{{ p }}</a>
+                {% endif %}
+            {% else %}
+                <span>…</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if pagination.has_next %}
+        <a href="{{ url_for('dashboard_sms', page=pagination.next_num, contact=current_contact, device=current_device) }}">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+        <p>No SMS messages found matching the filter criteria.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
