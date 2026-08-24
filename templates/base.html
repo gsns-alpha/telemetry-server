@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Battery Guard Dashboard{% endblock %}</title>
+    <title>{% block title %}DevicePulse — Telemetry Console{% endblock %}</title>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -389,12 +390,13 @@
     <!-- Sidebar -->
     <aside class="sidebar">
         <a href="{{ url_for('dashboard') }}" class="brand">
-            <div class="brand-icon">⚡</div>
+            <div class="brand-icon">📡</div>
             <div class="brand-text">
-                <h2>Battery Guard</h2>
-                <span>Remote Console</span>
+                <h2>DevicePulse</h2>
+                <span>Telemetry Console</span>
             </div>
         </a>
+
 
         <ul class="nav-links">
             <li class="nav-item {% if request.path == '/dashboard' %}active{% endif %}">

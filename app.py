@@ -1,15 +1,12 @@
 """
-Battery Guard — Backend Server
+DevicePulse — Telemetry Server & Web Console
 
 Flask application that:
-1. Receives synced data from the Android app via POST /api/v1/sync
+1. Receives synced telemetry from mobile clients via POST /api/v1/sync
 2. Stores data in PostgreSQL / SQLite
-3. Provides a web dashboard to browse captured data
-
-Authentication:
-- API endpoints: X-API-Key header
-- Dashboard: username/password login with session cookies
+3. Provides a web dashboard to browse telemetry logs
 """
+
 
 import os
 from datetime import datetime, timezone

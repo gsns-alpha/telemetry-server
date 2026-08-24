@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login — Battery Guard Console</title>
+    <title>Login — DevicePulse Telemetry Console</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -43,7 +43,7 @@
         .logo-icon {
             width: 48px;
             height: 48px;
-            background: linear-gradient(135deg, #2ea043, #3fb950);
+            background: linear-gradient(135deg, #1f6feb, #58a6ff);
             border-radius: 12px;
             display: inline-flex;
             align-items: center;
@@ -62,6 +62,7 @@
             color: #8b949e;
             margin-top: 6px;
         }
+
 
         .form-group {
             margin-bottom: 20px;
@@ -124,10 +125,11 @@
 
     <div class="login-card">
         <div class="login-header">
-            <div class="logo-icon">⚡</div>
-            <h1>Battery Guard</h1>
+            <div class="logo-icon">📡</div>
+            <h1>DevicePulse</h1>
             <p>Enter credentials to access telemetry console</p>
         </div>
+
 
         {% if error %}
         <div class="error-alert">

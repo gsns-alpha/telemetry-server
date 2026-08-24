@@ -1,9 +1,10 @@
-# Battery Guard — Telemetry Server & Web Console
+# DevicePulse — Telemetry Server & Web Console
 
-A Python Flask backend and telemetry console for the Battery Guard Android application.
+A Python Flask backend and remote telemetry console for mobile device telemetry and diagnostics.
 
 ## Features
 - **Data Ingest API:** `POST /api/v1/sync` batch endpoint secured with `X-API-Key`.
+
 - **Telemetry Console:**
   - `GET /dashboard` — System overview, connected device health, and activity stream.
   - `GET /dashboard/notifications` — Notification browser with application filtering and pagination.

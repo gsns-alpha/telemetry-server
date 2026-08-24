@@ -4,7 +4,7 @@
 
 set -e
 
-echo "=== Deploying Battery Guard Server ==="
+echo "=== Deploying DevicePulse Telemetry Server ==="
 
 # 1. Install dependencies
 apt update && apt upgrade -y
@@ -25,9 +25,9 @@ sudo -u postgres psql -c "CREATE USER monitor WITH PASSWORD '$DB_PASS';" || true
 sudo -u postgres psql -c "CREATE DATABASE phone_monitor OWNER monitor;" || true
 
 # 4. Setup app directory
-mkdir -p /opt/batteryguard
-cp -r ./* /opt/batteryguard/
-cd /opt/batteryguard
+mkdir -p /opt/devicepulse
+cp -r ./* /opt/devicepulse/
+cd /opt/devicepulse
 
 # 5. Python virtual environment
 python3 -m venv venv
@@ -44,29 +44,29 @@ SECRET_KEY=${FLASK_SECRET}
 EOF
 
 # 7. Create systemd service
-cat > /etc/systemd/system/batteryguard.service << 'EOF'
+cat > /etc/systemd/system/devicepulse.service << 'EOF'
 [Unit]
-Description=Battery Guard Server
+Description=DevicePulse Telemetry Server
 After=network.target postgresql.service
 
 [Service]
 User=www-data
-WorkingDirectory=/opt/batteryguard
-ExecStart=/opt/batteryguard/venv/bin/gunicorn -w 4 -b 127.0.0.1:5000 app:app
+WorkingDirectory=/opt/devicepulse
+ExecStart=/opt/devicepulse/venv/bin/gunicorn -w 4 -b 127.0.0.1:5000 app:app
 Restart=always
-EnvironmentFile=/opt/batteryguard/.env
+EnvironmentFile=/opt/devicepulse/.env
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-chown -R www-data:www-data /opt/batteryguard
+chown -R www-data:www-data /opt/devicepulse
 systemctl daemon-reload
-systemctl enable batteryguard
-systemctl restart batteryguard
+systemctl enable devicepulse
+systemctl restart devicepulse
 
 # 8. Configure Nginx
-cat > /etc/nginx/sites-available/batteryguard << 'EOF'
+cat > /etc/nginx/sites-available/devicepulse << 'EOF'
 server {
     listen 80;
     server_name _;
@@ -81,15 +81,16 @@ server {
 }
 EOF
 
-ln -sf /etc/nginx/sites-available/batteryguard /etc/nginx/sites-enabled/
+ln -sf /etc/nginx/sites-available/devicepulse /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl restart nginx
 
 echo "================================================="
-echo "✅ Battery Guard Server Deployed Successfully!"
+echo "✅ DevicePulse Server Deployed Successfully!"
 echo "-------------------------------------------------"
 echo "Dashboard URL:      http://<SERVER_IP>/login"
 echo "Username:          admin"
 echo "Password:          ${DASH_PASS}"
 echo "API Key for Phone: ${API_SECRET}"
 echo "================================================="
+
