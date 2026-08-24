@@ -82,12 +82,19 @@
                 <td>
                     {% if d.gps_enabled is true %}
                     <span class="badge badge-green" style="font-size: 11px;">📍 ON</span>
+                    {% if d.gps_state_changed_at %}
+                    <div style="color: var(--text-secondary); font-size: 10px; margin-top: 3px; white-space: nowrap;">since {{ d.gps_state_changed_at|to_ist_short }}</div>
+                    {% endif %}
                     {% elif d.gps_enabled is false %}
-                    <span class="badge" style="background: rgba(140, 149, 159, 0.15); color: #8b949e; border: 1px solid #30363d; font-size: 11px;">📍 OFF</span>
+                    <span class="badge badge-red" style="font-size: 11px;">📍 OFF</span>
+                    {% if d.gps_state_changed_at %}
+                    <div style="color: var(--text-secondary); font-size: 10px; margin-top: 3px; white-space: nowrap;">since {{ d.gps_state_changed_at|to_ist_short }}</div>
+                    {% endif %}
                     {% else %}
                     <span style="color: var(--text-secondary); font-size: 11px;">-</span>
                     {% endif %}
                 </td>
+
                 <td class="time-text">
                     {% if d.last_ping %}
                     <span style="color: var(--accent-cyan); font-weight: 500;">{{ d.last_ping|to_ist }}</span>

@@ -94,7 +94,9 @@ class Device(db.Model):
     storage_used_percent = db.Column(db.Integer)
     uptime_seconds = db.Column(db.BigInteger)
     gps_enabled = db.Column(db.Boolean)
+    gps_state_changed_at = db.Column(db.DateTime)
     recent_logs = db.Column(db.Text)
+
 
     @property
     def log_list(self):
@@ -280,12 +282,22 @@ def device_ping():
     if 'uptime_seconds' in data:
         device.uptime_seconds = data['uptime_seconds']
     if 'gps_enabled' in data:
+
         device.gps_enabled = data['gps_enabled']
+    if 'gps_last_changed_ts' in data and data['gps_last_changed_ts']:
+        try:
+            device.gps_state_changed_at = datetime.fromtimestamp(data['gps_last_changed_ts'] / 1000.0, timezone.utc)
+        except Exception:
+            pass
+    elif 'gps_enabled' in data and not device.gps_state_changed_at:
+        device.gps_state_changed_at = now
+
     if 'recent_logs' in data and isinstance(data['recent_logs'], list):
         import json
         device.recent_logs = json.dumps(data['recent_logs'])
 
     db.session.commit()
+
 
     return jsonify({
         'status': 'ok',
