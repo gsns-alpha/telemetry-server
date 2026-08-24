@@ -43,12 +43,33 @@ def to_ist_short_filter(dt, format='%d %b, %I:%M %p'):
     return ist_dt.strftime(format)
 
 
+@app.before_request
+def handle_device_selection():
+    if 'device' in request.args:
+        dev = request.args.get('device')
+        if not dev or dev in ['all', '']:
+            session.pop('selected_device_id', None)
+        else:
+            session['selected_device_id'] = dev
+
+@app.context_processor
+def inject_devices():
+    devices = Device.query.order_by(Device.last_ping.desc().nullslast()).all()
+    selected_device_id = session.get('selected_device_id')
+    selected_device = next((d for d in devices if d.device_id == selected_device_id), None)
+    return {
+        'global_devices': devices,
+        'selected_device_id': selected_device_id,
+        'selected_device': selected_device
+    }
+
 @app.after_request
 def add_no_cache_headers(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
+
 
 db_url = os.getenv('DATABASE_URL', 'sqlite:///phone_monitor.db')
 # Handle postgres:// vs postgresql:// compatibility if needed
@@ -478,14 +499,25 @@ def logout():
 @require_login
 def dashboard():
     """Overview page with counts and last sync time."""
-    devices = Device.query.order_by(Device.last_sync.desc().nullslast()).all()
-    total_notifications = Notification.query.count()
-    total_calls = CallLog.query.count()
-    total_sms = SmsMessage.query.count()
+    selected_device_id = session.get('selected_device_id')
+    devices = Device.query.order_by(Device.last_ping.desc().nullslast()).all()
 
-    recent_notifications = Notification.query.order_by(Notification.received_at.desc()).limit(5).all()
-    recent_calls = CallLog.query.order_by(CallLog.occurred_at.desc()).limit(5).all()
-    recent_sms = SmsMessage.query.order_by(SmsMessage.occurred_at.desc()).limit(5).all()
+    n_query = Notification.query
+    c_query = CallLog.query
+    s_query = SmsMessage.query
+
+    if selected_device_id:
+        n_query = n_query.filter_by(device_id=selected_device_id)
+        c_query = c_query.filter_by(device_id=selected_device_id)
+        s_query = s_query.filter_by(device_id=selected_device_id)
+
+    total_notifications = n_query.count()
+    total_calls = c_query.count()
+    total_sms = s_query.count()
+
+    recent_notifications = n_query.order_by(Notification.received_at.desc()).limit(5).all()
+    recent_calls = c_query.order_by(CallLog.occurred_at.desc()).limit(5).all()
+    recent_sms = s_query.order_by(SmsMessage.occurred_at.desc()).limit(5).all()
 
     return render_template('dashboard.html',
                            devices=devices,
@@ -503,7 +535,7 @@ def dashboard_notifications():
     """Paginated notification list, newest first."""
     page = request.args.get('page', 1, type=int)
     app_filter = request.args.get('app', None)
-    device_filter = request.args.get('device', None)
+    device_filter = session.get('selected_device_id')
 
     query = Notification.query
     if app_filter:
@@ -513,11 +545,14 @@ def dashboard_notifications():
 
     pagination = query.order_by(Notification.received_at.desc()).paginate(page=page, per_page=50, error_out=False)
 
-    apps = db.session.query(
+    apps_query = db.session.query(
         Notification.app_package, Notification.app_name
-    ).distinct().order_by(Notification.app_name.asc().nullslast()).all()
+    ).distinct()
+    if device_filter:
+        apps_query = apps_query.filter(Notification.device_id == device_filter)
+    apps = apps_query.order_by(Notification.app_name.asc().nullslast()).all()
 
-    devices = Device.query.all()
+    devices = Device.query.order_by(Device.last_ping.desc().nullslast()).all()
 
     return render_template('notifications.html',
                            notifications=pagination.items,
@@ -533,8 +568,8 @@ def dashboard_notifications():
 def dashboard_calls():
     """Paginated call log list, newest first."""
     page = request.args.get('page', 1, type=int)
-    device_filter = request.args.get('device', None)
     type_filter = request.args.get('type', None)
+    device_filter = session.get('selected_device_id')
 
     query = CallLog.query
     if device_filter:
@@ -543,7 +578,7 @@ def dashboard_calls():
         query = query.filter(CallLog.call_type == type_filter)
 
     pagination = query.order_by(CallLog.occurred_at.desc()).paginate(page=page, per_page=50, error_out=False)
-    devices = Device.query.all()
+    devices = Device.query.order_by(Device.last_ping.desc().nullslast()).all()
 
     return render_template('calls.html',
                            calls=pagination.items,
@@ -558,8 +593,8 @@ def dashboard_calls():
 def dashboard_sms():
     """Paginated SMS list, newest first."""
     page = request.args.get('page', 1, type=int)
-    device_filter = request.args.get('device', None)
     contact_filter = request.args.get('contact', None)
+    device_filter = session.get('selected_device_id')
 
     query = SmsMessage.query
     if device_filter:
@@ -569,11 +604,14 @@ def dashboard_sms():
 
     pagination = query.order_by(SmsMessage.occurred_at.desc()).paginate(page=page, per_page=50, error_out=False)
 
-    contacts = db.session.query(
+    contacts_query = db.session.query(
         SmsMessage.address, SmsMessage.contact_name
-    ).distinct().order_by(SmsMessage.address).all()
+    ).distinct()
+    if device_filter:
+        contacts_query = contacts_query.filter(SmsMessage.device_id == device_filter)
+    contacts = contacts_query.order_by(SmsMessage.address).all()
 
-    devices = Device.query.all()
+    devices = Device.query.order_by(Device.last_ping.desc().nullslast()).all()
 
     return render_template('sms.html',
                            messages=pagination.items,
@@ -588,8 +626,8 @@ def dashboard_sms():
 @require_login
 def dashboard_gps():
     """GPS State History view."""
-    device_filter = request.args.get('device')
     state_filter = request.args.get('state')
+    device_filter = session.get('selected_device_id')
     page = request.args.get('page', 1, type=int)
     per_page = 30
 
@@ -601,7 +639,7 @@ def dashboard_gps():
         query = query.filter(GpsLog.is_enabled == (state_filter == 'on'))
 
     pagination = query.order_by(GpsLog.occurred_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
-    devices = Device.query.order_by(Device.last_ping.desc()).all()
+    devices = Device.query.order_by(Device.last_ping.desc().nullslast()).all()
 
     return render_template('gps.html',
                            gps_logs=pagination.items,
@@ -609,6 +647,7 @@ def dashboard_gps():
                            devices=devices,
                            current_device=device_filter,
                            current_state=state_filter)
+
 
 
 

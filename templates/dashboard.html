@@ -117,12 +117,16 @@
                     {% endif %}
                 </td>
                 <td>
-                    <button onclick='openLogModal("{{ d.device_model }} ({{ d.device_id }})", {{ d.log_list | tojson }})' style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--text-primary); padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">📋 View Logs</button>
+                    <div style="display: flex; gap: 6px;">
+                        <a href="{{ url_for('dashboard', device=d.device_id) }}" style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--accent-cyan); padding: 3px 8px; border-radius: 4px; font-size: 11px; text-decoration: none; font-weight: 500;">Filter</a>
+                        <button onclick='openLogModal("{{ d.device_model }} ({{ d.device_id }})", {{ d.log_list | tojson }})' style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--text-primary); padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">📋 Logs</button>
+                    </div>
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+
 
 
     {% else %}
