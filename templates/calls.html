@@ -1,18 +1,19 @@
 {% extends 'base.html' %}
 
-{% block title %}Call Logs — DevicePulse{% endblock %}
+{% block title %}Voice (VOX) — DevicePulse{% endblock %}
 
 
 {% block content %}
 <div class="header-bar">
     <div>
-        <h1 class="page-title">Telephony Call Logs</h1>
-        <p class="page-subtitle">Incoming, outgoing, missed, and rejected calls</p>
+        <h1 class="page-title">Voice Stream (VOX)</h1>
+        <p class="page-subtitle">Channel ingress, egress, unanswered, and dropped traces</p>
     </div>
 
     <form method="GET" action="{{ url_for('dashboard_calls') }}" class="filter-group">
         <select name="type" onchange="this.form.submit()">
-            <option value="">All Call Types</option>
+            <option value="">All Channel Types</option>
+
             <option value="incoming" {% if current_type == 'incoming' %}selected{% endif %}>Incoming</option>
             <option value="outgoing" {% if current_type == 'outgoing' %}selected{% endif %}>Outgoing</option>
             <option value="missed" {% if current_type == 'missed' %}selected{% endif %}>Missed</option>

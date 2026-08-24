@@ -1,18 +1,19 @@
 {% extends 'base.html' %}
 
-{% block title %}Captured Notifications — DevicePulse{% endblock %}
+{% block title %}Events (EVT) — DevicePulse{% endblock %}
 
 
 {% block content %}
 <div class="header-bar">
     <div>
-        <h1 class="page-title">Captured Notifications</h1>
-        <p class="page-subtitle">Real-time alerts, messages, and app notifications</p>
+        <h1 class="page-title">Events Stream (EVT)</h1>
+        <p class="page-subtitle">Real-time system events, application alerts, and incoming signals</p>
     </div>
 
     <form method="GET" action="{{ url_for('dashboard_notifications') }}" class="filter-group">
         <select name="app" onchange="this.form.submit()">
-            <option value="">All Applications</option>
+            <option value="">All Sources</option>
+
             {% for a in apps %}
             <option value="{{ a.app_package }}" {% if current_app == a.app_package %}selected{% endif %}>
                 {{ a.app_name or a.app_package }}

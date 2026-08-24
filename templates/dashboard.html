@@ -1,47 +1,47 @@
 {% extends 'base.html' %}
 
-{% block title %}Telemetry Overview — DevicePulse Console{% endblock %}
+{% block title %}System Telemetry — DevicePulse Console{% endblock %}
 
 
 {% block content %}
 <div class="header-bar">
     <div>
-        <h1 class="page-title">Telemetry Overview</h1>
-        <p class="page-subtitle">Real-time status across connected devices</p>
+        <h1 class="page-title">System Overview</h1>
+        <p class="page-subtitle">Real-time status across connected hardware nodes</p>
     </div>
 </div>
 
 <!-- Metrics Cards -->
 <div class="grid-cards">
     <div class="stat-card" style="--card-accent: var(--accent-green);">
-        <span class="stat-label">Active Devices</span>
+        <span class="stat-label">Active Nodes</span>
         <span class="stat-value">{{ devices|length }}</span>
-        <span class="stat-meta">Monitored phones</span>
+        <span class="stat-meta">Connected endpoints</span>
     </div>
 
     <div class="stat-card" style="--card-accent: var(--accent-blue);">
-        <span class="stat-label">Captured Notifications</span>
+        <span class="stat-label">Event Stream (EVT)</span>
         <span class="stat-value">{{ total_notifications }}</span>
-        <span class="stat-meta">Across all apps</span>
+        <span class="stat-meta">System & alert logs</span>
     </div>
 
     <div class="stat-card" style="--card-accent: var(--accent-purple);">
-        <span class="stat-label">Call Records</span>
+        <span class="stat-label">Voice Traces (VOX)</span>
         <span class="stat-value">{{ total_calls }}</span>
-        <span class="stat-meta">Logged telephony calls</span>
+        <span class="stat-meta">Channel logs</span>
     </div>
 
     <div class="stat-card" style="--card-accent: var(--accent-amber);">
-        <span class="stat-label">SMS Messages</span>
+        <span class="stat-label">Data Packets (MSG)</span>
         <span class="stat-value">{{ total_sms }}</span>
-        <span class="stat-meta">Inbound & outbound</span>
+        <span class="stat-meta">Payload stream</span>
     </div>
 </div>
 
-<!-- Registered Devices -->
+<!-- Registered Nodes -->
 <div class="card-box">
     <div class="card-box-header" style="display: flex; justify-content: space-between; align-items: center;">
-        <h2 class="card-box-title">Registered Devices</h2>
+        <h2 class="card-box-title">Registered Nodes</h2>
         <div style="display: flex; align-items: center; gap: 12px;">
             <span id="refresh-timer" style="font-size: 12px; color: var(--text-secondary);">Auto-refreshes in 15s</span>
             <button onclick="location.reload()" style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--text-primary); padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer;">🔄 Refresh</button>
@@ -52,17 +52,18 @@
     <table>
         <thead>
             <tr>
-                <th>Device ID</th>
-                <th>Device Model</th>
+                <th>Node ID</th>
+                <th>Hardware Model</th>
                 <th>OS & Version</th>
-                <th>Battery & Temp</th>
-                <th>GPS State</th>
-                <th>Last Heartbeat Ping</th>
-                <th>Last Data Sync</th>
+                <th>Power & Temp</th>
+                <th>Geo State</th>
+                <th>Last Health Ping</th>
+                <th>Last Sync</th>
                 <th>Status</th>
                 <th>Diagnostics</th>
             </tr>
         </thead>
+
         <tbody>
             {% for d in devices %}
             <tr>
@@ -154,12 +155,13 @@
 
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-    <!-- Recent Notifications -->
+    <!-- Recent Events -->
     <div class="card-box">
         <div class="card-box-header">
-            <h2 class="card-box-title">Recent Notifications</h2>
+            <h2 class="card-box-title">Recent Events (EVT)</h2>
             <a href="{{ url_for('dashboard_notifications') }}" style="color: var(--accent-cyan); font-size: 13px; text-decoration: none;">View All &rarr;</a>
         </div>
+
 
         {% if recent_notifications %}
         <table>
@@ -193,12 +195,13 @@
         {% endif %}
     </div>
 
-    <!-- Recent Calls & SMS -->
+    <!-- Recent Stream Logs -->
     <div class="card-box">
         <div class="card-box-header">
-            <h2 class="card-box-title">Recent Telephony & SMS</h2>
-            <a href="{{ url_for('dashboard_calls') }}" style="color: var(--accent-green); font-size: 13px; text-decoration: none;">View Calls &rarr;</a>
+            <h2 class="card-box-title">Recent Stream Logs (VOX / MSG)</h2>
+            <a href="{{ url_for('dashboard_calls') }}" style="color: var(--accent-green); font-size: 13px; text-decoration: none;">View All &rarr;</a>
         </div>
+
 
         {% if recent_calls or recent_sms %}
         <table>

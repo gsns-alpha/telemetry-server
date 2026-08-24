@@ -43,7 +43,8 @@ def test_login_valid_credentials(client):
         'password': 'secretpass'
     }, follow_redirects=True)
     assert response.status_code == 200
-    assert b'Telemetry Overview' in response.data
+    assert b'System Overview' in response.data
+
 
 
 def test_dashboard_pages_render(client):

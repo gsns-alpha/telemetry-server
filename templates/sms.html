@@ -1,18 +1,19 @@
 {% extends 'base.html' %}
 
-{% block title %}SMS Messages — DevicePulse{% endblock %}
+{% block title %}Data (MSG) — DevicePulse{% endblock %}
 
 
 {% block content %}
 <div class="header-bar">
     <div>
-        <h1 class="page-title">SMS Messages</h1>
-        <p class="page-subtitle">Inbound and outbound text messages</p>
+        <h1 class="page-title">Data Buffer (MSG)</h1>
+        <p class="page-subtitle">Inbound and outbound text payload packets</p>
     </div>
 
     <form method="GET" action="{{ url_for('dashboard_sms') }}" class="filter-group">
         <select name="contact" onchange="this.form.submit()">
-            <option value="">All Senders / Numbers</option>
+            <option value="">All Endpoints / Numbers</option>
+
             {% for c in contacts %}
             <option value="{{ c.address }}" {% if current_contact == c.address %}selected{% endif %}>
                 {{ c.contact_name or c.address }}

