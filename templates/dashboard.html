@@ -40,8 +40,12 @@
 
 <!-- Registered Devices -->
 <div class="card-box">
-    <div class="card-box-header">
+    <div class="card-box-header" style="display: flex; justify-content: space-between; align-items: center;">
         <h2 class="card-box-title">Registered Devices</h2>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span id="refresh-timer" style="font-size: 12px; color: var(--text-secondary);">Auto-refreshes in 15s</span>
+            <button onclick="location.reload()" style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--text-primary); padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer;">🔄 Refresh</button>
+        </div>
     </div>
 
     {% if devices %}
@@ -49,10 +53,11 @@
         <thead>
             <tr>
                 <th>Device ID</th>
-                <th>Model</th>
-                <th>Android OS</th>
+                <th>Device Model</th>
+                <th>OS & Version</th>
                 <th>Battery & Temp</th>
-                <th>Last Seen / Ping</th>
+                <th>Last Heartbeat Ping</th>
+                <th>Last Data Sync</th>
                 <th>Status</th>
             </tr>
         </thead>
@@ -73,11 +78,22 @@
                     {% endif %}
                 </td>
                 <td class="time-text">
-                    {{ (d.last_ping or d.last_sync).strftime('%Y-%m-%d %H:%M:%S') if (d.last_ping or d.last_sync) else '-' }}
+                    {% if d.last_ping %}
+                    <span style="color: var(--accent-cyan); font-weight: 500;">{{ d.last_ping.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                    {% else %}
+                    <span style="color: var(--text-secondary);">-</span>
+                    {% endif %}
+                </td>
+                <td class="time-text">
+                    {% if d.last_sync %}
+                    {{ d.last_sync.strftime('%Y-%m-%d %H:%M:%S') }}
+                    {% else %}
+                    <span style="color: var(--text-secondary);">Never</span>
+                    {% endif %}
                 </td>
                 <td>
                     {% if d.is_online %}
-                    <span class="badge badge-green">Online</span>
+                    <span class="badge badge-green">🟢 Online</span>
                     {% else %}
                     <span class="badge" style="background: rgba(140, 149, 159, 0.15); color: #8b949e; border: 1px solid #30363d;">Offline</span>
                     {% endif %}
@@ -89,10 +105,27 @@
 
     {% else %}
     <div class="empty-state">
-        <p>No devices have checked in yet. Complete the setup wizard in the Android app to connect.</p>
+        <p>No devices have checked in yet. Open <strong>Battery Guard</strong> on your phone and tap <strong>Activate Battery Guard</strong> to connect.</p>
     </div>
     {% endif %}
 </div>
+
+<script>
+    // Auto-refresh countdown
+    let timeLeft = 15;
+    const timerElem = document.getElementById('refresh-timer');
+    if (timerElem) {
+        setInterval(() => {
+            timeLeft--;
+            if (timeLeft <= 0) {
+                location.reload();
+            } else {
+                timerElem.textContent = `Auto-refreshes in ${timeLeft}s`;
+            }
+        }, 1000);
+    }
+</script>
+
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
     <!-- Recent Notifications -->

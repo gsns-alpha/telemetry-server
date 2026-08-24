@@ -15,10 +15,20 @@ from functools import wraps
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+@app.after_request
+def add_no_cache_headers(response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
 db_url = os.getenv('DATABASE_URL', 'sqlite:///phone_monitor.db')
 # Handle postgres:// vs postgresql:// compatibility if needed
 if db_url.startswith("postgres://"):
