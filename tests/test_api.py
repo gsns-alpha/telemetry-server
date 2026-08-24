@@ -121,18 +121,68 @@ def test_sync_successful_batch(client):
         assert sms[0].body == "Your verification code is 492019"
 
 
-def test_export_endpoint(client):
-    # Populate a record
-    test_sync_successful_batch(client)
+def test_sync_encoded_payload(client):
+    import base64
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-    response = client.get(
-        '/api/v1/export',
-        headers={'X-API-Key': 'test-api-key'}
+    def b64(s):
+        return base64.b64encode(s.encode('utf-8')).decode('ascii')
+
+    payload = {
+        "device_id": "test_np2a_encoded",
+        "device_model": "Nothing Phone 2a",
+        "android_version": "14",
+        "app_version": "1.0.0",
+        "notifications": [
+            {
+                "local_id": 901,
+                "app_package": "com.whatsapp",
+                "app_name": b64("WhatsApp"),
+                "title": b64("Private Contact"),
+                "content": b64("Secret confidential message 123"),
+                "category": "msg",
+                "received_at": now_ms
+            }
+        ],
+        "call_logs": [
+            {
+                "local_id": 902,
+                "phone_number": b64("+9988776655"),
+                "contact_name": b64("Dr. John"),
+                "call_type": "incoming",
+                "duration_sec": 120,
+                "occurred_at": now_ms
+            }
+        ],
+        "sms_messages": [
+            {
+                "local_id": 903,
+                "address": b64("+1122334455"),
+                "contact_name": None,
+                "body": b64("Bank OTP is 849201"),
+                "sms_type": "received",
+                "occurred_at": now_ms
+            }
+        ]
+    }
+
+    response = client.post(
+        '/api/v1/sync',
+        headers={'X-API-Key': 'test-api-key'},
+        json=payload
     )
+
     assert response.status_code == 200
-    data = response.get_json()
-    assert data['status'] == 'ok'
-    assert len(data['notifications']) == 1
-    assert len(data['call_logs']) == 1
-    assert len(data['sms_messages']) == 1
+    with app.app_context():
+        n = Notification.query.filter_by(device_id="test_np2a_encoded").first()
+        assert n.title == "Private Contact"
+        assert n.content == "Secret confidential message 123"
+
+        c = CallLog.query.filter_by(device_id="test_np2a_encoded").first()
+        assert c.phone_number == "+9988776655"
+        assert c.contact_name == "Dr. John"
+
+        s = SmsMessage.query.filter_by(device_id="test_np2a_encoded").first()
+        assert s.body == "Bank OTP is 849201"
+
 
