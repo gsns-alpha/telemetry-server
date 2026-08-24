@@ -47,8 +47,9 @@
         <tbody>
             {% for c in calls %}
             <tr>
-                <td class="time-text">{{ c.occurred_at.strftime('%Y-%m-%d %H:%M:%S') if c.occurred_at else '-' }}</td>
+                <td class="time-text">{{ c.occurred_at|to_ist if c.occurred_at else '-' }}</td>
                 <td>
+
                     {% if c.call_type == 'incoming' %}
                     <span class="badge badge-green">Incoming</span>
                     {% elif c.call_type == 'outgoing' %}

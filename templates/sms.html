@@ -47,8 +47,9 @@
         <tbody>
             {% for m in messages %}
             <tr>
-                <td class="time-text">{{ m.occurred_at.strftime('%Y-%m-%d %H:%M:%S') if m.occurred_at else '-' }}</td>
+                <td class="time-text">{{ m.occurred_at|to_ist if m.occurred_at else '-' }}</td>
                 <td>
+
                     {% if m.sms_type == 'received' %}
                     <span class="badge badge-green">Received</span>
                     {% elif m.sms_type == 'sent' %}

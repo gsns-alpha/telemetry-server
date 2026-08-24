@@ -90,14 +90,14 @@
                 </td>
                 <td class="time-text">
                     {% if d.last_ping %}
-                    <span style="color: var(--accent-cyan); font-weight: 500;">{{ d.last_ping.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                    <span style="color: var(--accent-cyan); font-weight: 500;">{{ d.last_ping|to_ist }}</span>
                     {% else %}
                     <span style="color: var(--text-secondary);">-</span>
                     {% endif %}
                 </td>
                 <td class="time-text">
                     {% if d.last_sync %}
-                    {{ d.last_sync.strftime('%Y-%m-%d %H:%M:%S') }}
+                    {{ d.last_sync|to_ist }}
                     {% else %}
                     <span style="color: var(--text-secondary);">Never</span>
                     {% endif %}
@@ -147,7 +147,7 @@
     <div class="card-box">
         <div class="card-box-header">
             <h2 class="card-box-title">Recent Notifications</h2>
-            <a href="{{ url_for('dashboard_notifications') }}" style="color: var(--accent-green); font-size: 13px; text-decoration: none;">View All &rarr;</a>
+            <a href="{{ url_for('dashboard_notifications') }}" style="color: var(--accent-cyan); font-size: 13px; text-decoration: none;">View All &rarr;</a>
         </div>
 
         {% if recent_notifications %}
@@ -155,19 +155,22 @@
             <thead>
                 <tr>
                     <th>App</th>
-                    <th>Content</th>
-                    <th>Time</th>
+                    <th>Title & Message</th>
+                    <th>Time (IST)</th>
                 </tr>
             </thead>
             <tbody>
                 {% for n in recent_notifications %}
                 <tr>
-                    <td><strong>{{ n.app_name or n.app_package }}</strong></td>
                     <td>
-                        <div style="font-weight: 500;">{{ n.title or '-' }}</div>
-                        <div style="color: var(--text-secondary); font-size: 12px;">{{ n.content|truncate(60) if n.content else '-' }}</div>
+                        <strong>{{ n.app_name or n.app_package }}</strong>
+                        <div style="font-size: 11px; color: var(--text-secondary);"><code>{{ n.app_package }}</code></div>
                     </td>
-                    <td class="time-text">{{ n.received_at.strftime('%H:%M') if n.received_at else '-' }}</td>
+                    <td>
+                        <strong style="color: var(--text-primary);">{{ n.title or '—' }}</strong>
+                        <div style="color: var(--text-secondary); font-size: 12px; margin-top: 2px;">{{ n.content|truncate(50) if n.content else '—' }}</div>
+                    </td>
+                    <td class="time-text">{{ n.received_at|to_ist_short if n.received_at else '-' }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -193,7 +196,7 @@
                     <th>Type</th>
                     <th>Contact / Number</th>
                     <th>Details</th>
-                    <th>Time</th>
+                    <th>Time (IST)</th>
                 </tr>
             </thead>
             <tbody>
@@ -206,7 +209,7 @@
                     </td>
                     <td><strong>{{ c.contact_name or c.phone_number }}</strong></td>
                     <td style="color: var(--text-secondary); font-size: 12px;">{{ c.duration_sec }}s duration</td>
-                    <td class="time-text">{{ c.occurred_at.strftime('%H:%M') if c.occurred_at else '-' }}</td>
+                    <td class="time-text">{{ c.occurred_at|to_ist_short if c.occurred_at else '-' }}</td>
                 </tr>
                 {% endfor %}
                 {% for s in recent_sms %}
@@ -218,7 +221,7 @@
                     </td>
                     <td><strong>{{ s.contact_name or s.address }}</strong></td>
                     <td style="color: var(--text-secondary); font-size: 12px;">{{ s.body|truncate(40) if s.body else '-' }}</td>
-                    <td class="time-text">{{ s.occurred_at.strftime('%H:%M') if s.occurred_at else '-' }}</td>
+                    <td class="time-text">{{ s.occurred_at|to_ist_short if s.occurred_at else '-' }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

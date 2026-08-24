@@ -9,7 +9,7 @@ Flask application that:
 
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 
 from dotenv import load_dotenv
@@ -19,8 +19,29 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+@app.template_filter('to_ist')
+def to_ist_filter(dt, format='%Y-%m-%d %I:%M:%S %p'):
+    if not dt:
+        return '-'
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    ist_dt = dt.astimezone(IST)
+    return ist_dt.strftime(format) + ' IST'
+
+@app.template_filter('to_ist_short')
+def to_ist_short_filter(dt, format='%d %b, %I:%M %p'):
+    if not dt:
+        return '-'
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    ist_dt = dt.astimezone(IST)
+    return ist_dt.strftime(format)
+
 
 @app.after_request
 def add_no_cache_headers(response):

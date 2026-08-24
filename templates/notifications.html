@@ -48,8 +48,9 @@
         <tbody>
             {% for n in notifications %}
             <tr>
-                <td class="time-text">{{ n.received_at.strftime('%Y-%m-%d %H:%M:%S') if n.received_at else '-' }}</td>
+                <td class="time-text">{{ n.received_at|to_ist if n.received_at else '-' }}</td>
                 <td>
+
                     <strong>{{ n.app_name or n.app_package }}</strong>
                     <div style="font-size: 11px; color: var(--text-secondary);"><code>{{ n.app_package }}</code></div>
                 </td>
