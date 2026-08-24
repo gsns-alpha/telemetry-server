@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+
+{% block title %}GPS State History — DevicePulse{% endblock %}
+
+{% block content %}
+<div class="header-bar">
+    <div>
+        <h1 class="page-title">GPS & Location State History</h1>
+        <p class="page-subtitle">Timeline of when GPS hardware was switched ON or OFF across devices</p>
+    </div>
+
+    <form method="GET" action="{{ url_for('dashboard_gps') }}" class="filter-group">
+        <select name="state" onchange="this.form.submit()">
+            <option value="">All States</option>
+            <option value="on" {% if current_state == 'on' %}selected{% endif %}>🟢 Switched ON</option>
+            <option value="off" {% if current_state == 'off' %}selected{% endif %}>🔴 Switched OFF</option>
+        </select>
+
+        {% if devices|length > 1 %}
+        <select name="device" onchange="this.form.submit()">
+            <option value="">All Devices</option>
+            {% for d in devices %}
+            <option value="{{ d.device_id }}" {% if current_device == d.device_id %}selected{% endif %}>
+                {{ d.device_model }} ({{ d.device_id|truncate(10) }})
+            </option>
+            {% endfor %}
+        </select>
+        {% endif %}
+    </form>
+</div>
+
+<div class="card-box">
+    {% if gps_logs %}
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 220px;">Timestamp (IST)</th>
+                <th style="width: 220px;">Device Model</th>
+                <th style="width: 180px;">Hardware State</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log, model in gps_logs %}
+            <tr>
+                <td class="time-text">
+                    <strong style="color: var(--accent-cyan);">{{ log.occurred_at|to_ist }}</strong>
+                </td>
+                <td>
+                    <strong>{{ model or log.device_id }}</strong>
+                    <div style="font-size: 11px; color: var(--text-secondary);"><code>{{ log.device_id }}</code></div>
+                </td>
+                <td>
+                    {% if log.is_enabled %}
+                    <span class="badge badge-green" style="font-size: 12px; padding: 4px 10px;">📍 Switched ON</span>
+                    {% else %}
+                    <span class="badge badge-red" style="font-size: 12px; padding: 4px 10px;">📍 Switched OFF</span>
+                    {% endif %}
+                </td>
+                <td style="color: var(--text-secondary); font-size: 13px;">
+                    {% if log.is_enabled %}
+                    Location hardware provider was enabled by user in Quick Settings.
+                    {% else %}
+                    Location hardware provider was disabled by user in Quick Settings.
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if pagination and pagination.pages > 1 %}
+    <div class="pagination">
+        {% if pagination.has_prev %}
+        <a href="{{ url_for('dashboard_gps', page=pagination.prev_num, device=current_device, state=current_state) }}" class="btn">&larr; Previous</a>
+        {% endif %}
+        <span class="page-info">Page {{ pagination.page }} of {{ pagination.pages }}</span>
+        {% if pagination.has_next %}
+        <a href="{{ url_for('dashboard_gps', page=pagination.next_num, device=current_device, state=current_state) }}" class="btn">Next &rarr;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+        <p>No GPS state change events recorded yet. When a monitored phone toggles Location ON or OFF, events will appear here chronologically.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

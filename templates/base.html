@@ -437,7 +437,14 @@
                     <span>SMS Messages</span>
                 </a>
             </li>
+            <li class="nav-item {% if request.path == '/dashboard/gps' %}active{% endif %}">
+                <a href="{{ url_for('dashboard_gps') }}">
+                    <span>📍</span>
+                    <span>GPS History</span>
+                </a>
+            </li>
         </ul>
+
 
         <div class="sidebar-footer">
             <a href="{{ url_for('logout') }}" class="logout-btn">
