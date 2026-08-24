@@ -72,6 +72,18 @@ class Device(db.Model):
     ram_used_percent = db.Column(db.Integer)
     storage_used_percent = db.Column(db.Integer)
     uptime_seconds = db.Column(db.BigInteger)
+    gps_enabled = db.Column(db.Boolean)
+    recent_logs = db.Column(db.Text)
+
+    @property
+    def log_list(self):
+        if not self.recent_logs:
+            return []
+        try:
+            import json
+            return json.loads(self.recent_logs)
+        except Exception:
+            return [self.recent_logs]
 
     @property
     def is_online(self):
@@ -81,6 +93,7 @@ class Device(db.Model):
         if last_seen.tzinfo is None:
             last_seen = last_seen.replace(tzinfo=timezone.utc)
         return (datetime.now(timezone.utc) - last_seen).total_seconds() < 600
+
 
 
 
@@ -245,8 +258,14 @@ def device_ping():
         device.storage_used_percent = data['storage_used_percent']
     if 'uptime_seconds' in data:
         device.uptime_seconds = data['uptime_seconds']
+    if 'gps_enabled' in data:
+        device.gps_enabled = data['gps_enabled']
+    if 'recent_logs' in data and isinstance(data['recent_logs'], list):
+        import json
+        device.recent_logs = json.dumps(data['recent_logs'])
 
     db.session.commit()
+
     return jsonify({
         'status': 'ok',
         'server_time': now.isoformat(),

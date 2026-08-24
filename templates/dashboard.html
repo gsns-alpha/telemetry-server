@@ -56,9 +56,11 @@
                 <th>Device Model</th>
                 <th>OS & Version</th>
                 <th>Battery & Temp</th>
+                <th>GPS State</th>
                 <th>Last Heartbeat Ping</th>
                 <th>Last Data Sync</th>
                 <th>Status</th>
+                <th>Diagnostics</th>
             </tr>
         </thead>
         <tbody>
@@ -75,6 +77,15 @@
                     {% endif %}
                     {% else %}
                     <span style="color: var(--text-secondary);">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if d.gps_enabled is true %}
+                    <span class="badge badge-green" style="font-size: 11px;">📍 ON</span>
+                    {% elif d.gps_enabled is false %}
+                    <span class="badge" style="background: rgba(140, 149, 159, 0.15); color: #8b949e; border: 1px solid #30363d; font-size: 11px;">📍 OFF</span>
+                    {% else %}
+                    <span style="color: var(--text-secondary); font-size: 11px;">-</span>
                     {% endif %}
                 </td>
                 <td class="time-text">
@@ -98,10 +109,14 @@
                     <span class="badge" style="background: rgba(140, 149, 159, 0.15); color: #8b949e; border: 1px solid #30363d;">Offline</span>
                     {% endif %}
                 </td>
+                <td>
+                    <button onclick='openLogModal("{{ d.device_model }} ({{ d.device_id }})", {{ d.log_list | tojson }})' style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--text-primary); padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">📋 View Logs</button>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+
 
     {% else %}
     <div class="empty-state">
@@ -215,4 +230,37 @@
         {% endif %}
     </div>
 </div>
+
+<!-- Diagnostics Log Modal -->
+<div id="logModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+    <div style="background: var(--bg-surface); border: 1px solid var(--border-color); width: 90%; max-width: 700px; border-radius: 12px; padding: 24px; box-shadow: var(--shadow-lg); max-height: 80vh; display: flex; flex-direction: column;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 id="modalDeviceTitle" style="font-size: 16px; font-weight: 600; color: var(--text-primary);">Device Diagnostic Logs</h3>
+            <button onclick="closeLogModal()" style="background: none; border: none; color: var(--text-secondary); font-size: 20px; cursor: pointer;">&times;</button>
+        </div>
+        <div id="modalLogContent" style="background: #070a10; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; color: #7ee787; overflow-y: auto; flex: 1; min-height: 250px; line-height: 1.6; white-space: pre-wrap;">
+        </div>
+        <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+            <button onclick="closeLogModal()" style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    function openLogModal(deviceTitle, logs) {
+        document.getElementById('modalDeviceTitle').textContent = `Diagnostics: ${deviceTitle}`;
+        const container = document.getElementById('modalLogContent');
+        if (!logs || logs.length === 0) {
+            container.textContent = "No log records received from this device yet.";
+        } else {
+            container.textContent = logs.join("\n");
+        }
+        document.getElementById('logModal').style.display = 'flex';
+    }
+
+    function closeLogModal() {
+        document.getElementById('logModal').style.display = 'none';
+    }
+</script>
 {% endblock %}
+
