@@ -279,6 +279,7 @@ class CdrStatement(db.Model):
     __tablename__ = 'cdr_statements'
     id = pk_column()
     filename = db.Column(db.String(256), nullable=False, unique=True, index=True)
+    file_hash = db.Column(db.String(64), index=True, nullable=True)
     bill_no = db.Column(db.String(64))
     account_no = db.Column(db.String(64))
     bill_period = db.Column(db.String(128), index=True)
@@ -313,6 +314,10 @@ class CdrCall(db.Model):
     page_number = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
+    __table_args__ = (
+        db.UniqueConstraint('source_subscriber', 'occurred_at', 'destination_number', 'duration_sec', name='uq_cdr_call_record'),
+    )
+
 
 class CdrSms(db.Model):
     __tablename__ = 'cdr_sms'
@@ -331,6 +336,10 @@ class CdrSms(db.Model):
     sms_category = db.Column(db.String(128))
     page_number = db.Column(db.Integer)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        db.UniqueConstraint('source_subscriber', 'occurred_at', 'destination_number', 'sms_count', name='uq_cdr_sms_record'),
+    )
 
 
 
@@ -964,100 +973,234 @@ def dashboard_gps():
 
 # ─── Itemized Bill & CDR Processing ──────────────────────────────────
 
-def ingest_cdr_data(parsed_data, target_subscriber='7760174171'):
+def _normalize_dt_for_comparison(dt):
+    """Normalize datetime to naive UTC datetime for cross-DB comparison."""
+    if dt is None:
+        return None
+    if isinstance(dt, str):
+        return dt
+    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def ingest_cdr_data(parsed_data, target_subscriber='7760174171', allow_reupload=False):
     """
     Ingests parsed statement data into cdr_statements, cdr_calls, and cdr_sms tables.
-    Replaces existing records for the same statement filename to ensure consistency.
+    Performs duplicate checks:
+      1. File-level duplicate check: If statement (by file_hash, filename, or bill_no+bill_period)
+         already exists in database, ignores the upload and skips re-inserting records.
+      2. Record-level duplicate check: Checks each call and SMS before inserting into cdr_calls
+         and cdr_sms, ignoring any record that already exists in the database or current batch.
     """
     filename = parsed_data.get('filename')
     if not filename:
         return {'status': 'error', 'message': 'Missing filename'}
 
-    statement = CdrStatement.query.filter_by(filename=filename).first()
-    if not statement:
+    target_sub = parsed_data.get('target_subscriber') or target_subscriber or '7760174171'
+    file_hash = parsed_data.get('file_hash')
+    bill_no = parsed_data.get('bill_no')
+    bill_period = parsed_data.get('bill_period')
+    account_no = parsed_data.get('account_no')
+
+    # 1. FILE-LEVEL DUPLICATE CHECK
+    existing_statement = None
+    if file_hash:
+        existing_statement = CdrStatement.query.filter_by(
+            file_hash=file_hash,
+            target_subscriber=target_sub
+        ).first()
+
+    if not existing_statement and filename:
+        existing_statement = CdrStatement.query.filter_by(
+            filename=filename,
+            target_subscriber=target_sub
+        ).first()
+
+    if not existing_statement and bill_no and bill_period:
+        existing_statement = CdrStatement.query.filter_by(
+            bill_no=bill_no,
+            bill_period=bill_period,
+            account_no=account_no,
+            target_subscriber=target_sub
+        ).first()
+
+    # If already exists and re-upload is not forced, ignore duplicate upload!
+    if existing_statement and not allow_reupload:
+        if file_hash and not existing_statement.file_hash:
+            try:
+                existing_statement.file_hash = file_hash
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+        return {
+            'status': 'skipped',
+            'duplicate': True,
+            'skipped': True,
+            'message': f"Statement '{filename}' (Period: {existing_statement.bill_period}) already exists in database. Duplicate file ignored.",
+            'statement_id': existing_statement.id,
+            'filename': existing_statement.filename,
+            'bill_period': existing_statement.bill_period,
+            'inserted_calls': 0,
+            'inserted_sms': 0,
+            'skipped_calls': parsed_data.get('total_calls', 0),
+            'skipped_sms': parsed_data.get('total_sms', 0),
+            'total_calls': existing_statement.total_calls,
+            'total_sms': existing_statement.total_sms,
+            'total_duration_sec': existing_statement.total_duration_sec
+        }
+
+    # Pre-fetch existing calls and SMS sets BEFORE adding any new objects to session
+    raw_calls = parsed_data.get('calls', [])
+    raw_sms = parsed_data.get('sms', [])
+
+    existing_calls_query = db.session.query(
+        CdrCall.occurred_at,
+        CdrCall.destination_number,
+        CdrCall.duration_sec
+    ).filter(CdrCall.source_subscriber == target_sub)
+
+    existing_calls_set = {
+        (_normalize_dt_for_comparison(rec[0]), str(rec[1]).strip(), int(rec[2]))
+        for rec in existing_calls_query.all()
+    }
+
+    existing_sms_query = db.session.query(
+        CdrSms.occurred_at,
+        CdrSms.destination_number,
+        CdrSms.sms_count
+    ).filter(CdrSms.source_subscriber == target_sub)
+
+    existing_sms_set = {
+        (_normalize_dt_for_comparison(rec[0]), str(rec[1]).strip(), int(rec[2]))
+        for rec in existing_sms_query.all()
+    }
+
+    # Brand new statement
+    if not existing_statement:
         statement = CdrStatement(
             filename=filename,
-            bill_no=parsed_data.get('bill_no'),
-            account_no=parsed_data.get('account_no'),
-            bill_period=parsed_data.get('bill_period'),
+            file_hash=file_hash,
+            bill_no=bill_no,
+            account_no=account_no,
+            bill_period=bill_period,
             bill_date=parsed_data.get('bill_date'),
-            target_subscriber=target_subscriber,
-            total_calls=parsed_data.get('total_calls', 0),
-            total_sms=parsed_data.get('total_sms', 0),
-            total_duration_sec=parsed_data.get('total_duration_sec', 0),
-            total_pulses=parsed_data.get('total_call_pulses', 0) + parsed_data.get('total_sms_pulses', 0),
+            target_subscriber=target_sub,
+            total_calls=0,
+            total_sms=0,
+            total_duration_sec=0,
+            total_pulses=0,
             uploaded_at=datetime.now(timezone.utc)
         )
         db.session.add(statement)
         db.session.flush()
     else:
-        statement.bill_no = parsed_data.get('bill_no')
-        statement.account_no = parsed_data.get('account_no')
-        statement.bill_period = parsed_data.get('bill_period')
-        statement.bill_date = parsed_data.get('bill_date')
-        statement.target_subscriber = target_subscriber
-        statement.total_calls = parsed_data.get('total_calls', 0)
-        statement.total_sms = parsed_data.get('total_sms', 0)
-        statement.total_duration_sec = parsed_data.get('total_duration_sec', 0)
-        statement.total_pulses = parsed_data.get('total_call_pulses', 0) + parsed_data.get('total_sms_pulses', 0)
-        statement.uploaded_at = datetime.now(timezone.utc)
-        
-        # Clear existing calls and sms for this statement to prevent duplicate accumulation
-        CdrCall.query.filter_by(statement_id=statement.id).delete()
-        CdrSms.query.filter_by(statement_id=statement.id).delete()
-        db.session.flush()
+        statement = existing_statement
 
-    # Bulk insert calls
+    # 2. RECORD-LEVEL DUPLICATE CHECK (CALLS)
     inserted_calls = 0
-    for c in parsed_data.get('calls', []):
+    skipped_calls = 0
+    total_call_duration_added = 0
+    total_call_pulses_added = 0
+    seen_batch_calls = set()
+
+    for c in raw_calls:
+        raw_occ = c.get('occurred_at') or datetime.now(timezone.utc)
+        norm_occ = _normalize_dt_for_comparison(raw_occ)
+        dest_num = str(c.get('destination_number', '')).strip()
+        dur_sec = int(c.get('duration_sec', 0))
+
+        call_key = (norm_occ, dest_num, dur_sec)
+
+        if call_key in existing_calls_set or call_key in seen_batch_calls:
+            skipped_calls += 1
+            continue
+
+        seen_batch_calls.add(call_key)
+        existing_calls_set.add(call_key)
+
+        pulse_val = int(c.get('pulse', 1))
         call_entry = CdrCall(
             statement_id=statement.id,
-            source_subscriber=c.get('source_subscriber') or target_subscriber,
+            source_subscriber=c.get('source_subscriber') or target_sub,
             serial_no=c.get('serial_no'),
-            occurred_at=c.get('occurred_at') or datetime.now(timezone.utc),
+            occurred_at=raw_occ,
             call_date_str=c.get('call_date_str'),
             call_time_str=c.get('call_time_str'),
-            destination_number=c.get('destination_number'),
+            destination_number=dest_num,
             duration_str=c.get('duration_str') or '00:00',
-            duration_sec=c.get('duration_sec', 0),
-            pulse=c.get('pulse', 1),
-            amount=c.get('amount', 0.00),
+            duration_sec=dur_sec,
+            pulse=pulse_val,
+            amount=float(c.get('amount', 0.00)),
             operator=c.get('operator'),
             call_category=c.get('call_category'),
             page_number=c.get('page_number')
         )
         db.session.add(call_entry)
         inserted_calls += 1
+        total_call_duration_added += dur_sec
+        total_call_pulses_added += pulse_val
 
-    # Bulk insert sms
+    # 3. RECORD-LEVEL DUPLICATE CHECK (SMS)
     inserted_sms = 0
-    for s in parsed_data.get('sms', []):
+    skipped_sms = 0
+    total_sms_pulses_added = 0
+    seen_batch_sms = set()
+
+    for s in raw_sms:
+        raw_occ = s.get('occurred_at') or datetime.now(timezone.utc)
+        norm_occ = _normalize_dt_for_comparison(raw_occ)
+        dest_num = str(s.get('destination_number', '')).strip()
+        s_count = int(s.get('sms_count', 1))
+
+        sms_key = (norm_occ, dest_num, s_count)
+
+        if sms_key in existing_sms_set or sms_key in seen_batch_sms:
+            skipped_sms += 1
+            continue
+
+        seen_batch_sms.add(sms_key)
+        existing_sms_set.add(sms_key)
+
+        pulse_val = int(s.get('pulse', 1))
         sms_entry = CdrSms(
             statement_id=statement.id,
-            source_subscriber=s.get('source_subscriber') or target_subscriber,
+            source_subscriber=s.get('source_subscriber') or target_sub,
             serial_no=s.get('serial_no'),
-            occurred_at=s.get('occurred_at') or datetime.now(timezone.utc),
+            occurred_at=raw_occ,
             sms_date_str=s.get('sms_date_str'),
             sms_time_str=s.get('sms_time_str'),
-            destination_number=s.get('destination_number'),
-            sms_count=s.get('sms_count', 1),
-            pulse=s.get('pulse', 1),
-            amount=s.get('amount', 0.00),
+            destination_number=dest_num,
+            sms_count=s_count,
+            pulse=pulse_val,
+            amount=float(s.get('amount', 0.00)),
             operator=s.get('operator'),
             sms_category=s.get('sms_category'),
             page_number=s.get('page_number')
         )
         db.session.add(sms_entry)
         inserted_sms += 1
+        total_sms_pulses_added += pulse_val
+
+    statement.total_calls = inserted_calls
+    statement.total_sms = inserted_sms
+    statement.total_duration_sec = total_call_duration_added
+    statement.total_pulses = total_call_pulses_added + total_sms_pulses_added
 
     db.session.commit()
+
     return {
         'status': 'success',
+        'duplicate': False,
+        'skipped': False,
         'statement_id': statement.id,
         'filename': filename,
         'bill_period': statement.bill_period,
         'inserted_calls': inserted_calls,
         'inserted_sms': inserted_sms,
+        'skipped_calls': skipped_calls,
+        'skipped_sms': skipped_sms,
         'total_duration_sec': statement.total_duration_sec
     }
 
@@ -1233,17 +1376,33 @@ def dashboard_cdr_upload():
 
     total_calls_added = sum(r.get('inserted_calls', 0) for r in results if r.get('status') == 'success')
     total_sms_added = sum(r.get('inserted_sms', 0) for r in results if r.get('status') == 'success')
+    total_calls_skipped = sum(r.get('skipped_calls', 0) for r in results)
+    total_sms_skipped = sum(r.get('skipped_sms', 0) for r in results)
+    files_added = sum(1 for r in results if r.get('status') == 'success')
+    files_skipped = sum(1 for r in results if r.get('status') == 'skipped')
 
     if request.headers.get('Accept') == 'application/json' or request.is_json:
         return jsonify({
             'status': 'success',
             'files_processed': len(results),
+            'files_added': files_added,
+            'files_skipped': files_skipped,
             'total_calls_added': total_calls_added,
             'total_sms_added': total_sms_added,
+            'total_calls_skipped': total_calls_skipped,
+            'total_sms_skipped': total_sms_skipped,
             'details': results
         })
 
-    return redirect(url_for('dashboard_cdr', msg=f"Processed {len(results)} statement(s): {total_calls_added} calls, {total_sms_added} SMS added."))
+    if files_added == 0 and files_skipped > 0:
+        msg = f"Duplicate check: All {files_skipped} uploaded statement file(s) are already present in database. Duplicate records ignored (0 new records added)."
+        return redirect(url_for('dashboard_cdr', msg=msg))
+    elif files_skipped > 0:
+        msg = f"Processed {len(results)} statement(s): +{total_calls_added} calls, +{total_sms_added} SMS added ({files_skipped} duplicate statement(s) ignored)."
+        return redirect(url_for('dashboard_cdr', msg=msg))
+    else:
+        msg = f"Processed {len(results)} statement(s): +{total_calls_added} calls, +{total_sms_added} SMS added."
+        return redirect(url_for('dashboard_cdr', msg=msg))
 
 
 @app.route('/dashboard/cdr/import-local', methods=['POST'])
@@ -1280,12 +1439,20 @@ def dashboard_cdr_import_local():
 
     total_calls_added = sum(r.get('inserted_calls', 0) for r in results if r.get('status') == 'success')
     total_sms_added = sum(r.get('inserted_sms', 0) for r in results if r.get('status') == 'success')
+    total_calls_skipped = sum(r.get('skipped_calls', 0) for r in results)
+    total_sms_skipped = sum(r.get('skipped_sms', 0) for r in results)
+    files_added = sum(1 for r in results if r.get('status') == 'success')
+    files_skipped = sum(1 for r in results if r.get('status') == 'skipped')
 
     return jsonify({
         'status': 'success',
         'files_processed': len(results),
+        'files_added': files_added,
+        'files_skipped': files_skipped,
         'total_calls_added': total_calls_added,
         'total_sms_added': total_sms_added,
+        'total_calls_skipped': total_calls_skipped,
+        'total_sms_skipped': total_sms_skipped,
         'details': results
     })
 
@@ -1754,7 +1921,10 @@ with app.app_context():
         with db.engine.connect() as conn:
             conn.execute(text("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
             conn.execute(text("ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
-            # Purge existing duplicate records
+            conn.execute(text("ALTER TABLE cdr_statements ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cdr_statements_file_hash ON cdr_statements(file_hash);"))
+            
+            # Purge any duplicate records
             conn.execute(text("""
                 DELETE FROM sms_messages WHERE id NOT IN (
                     SELECT MIN(id) FROM sms_messages GROUP BY device_id, address, body, occurred_at
@@ -1776,25 +1946,26 @@ with app.app_context():
 
     # Auto-seed existing statement PDFs from cr/ directory if table is empty
     try:
-        if CdrStatement.query.count() == 0:
-            import glob
-            candidate_paths = [
-                '/Users/om/Documents/workspaces/cf/cr/*.pdf',
-                '/data/statements/*.pdf',
-                './cr/*.pdf'
-            ]
-            seed_files = []
-            for cp in candidate_paths:
-                seed_files.extend(glob.glob(cp))
-            seed_files = sorted(list(set(seed_files)))
-            if seed_files:
-                app.logger.info(f"Auto-seeding {len(seed_files)} CDR statements for 7760174171...")
-                for sf in seed_files:
-                    try:
-                        p_data = parse_cdr_pdf(sf, target_subscriber='7760174171')
-                        ingest_cdr_data(p_data, target_subscriber='7760174171')
-                    except Exception as seed_err:
-                        app.logger.warning(f"Error auto-seeding {sf}: {seed_err}")
+        if not app.config.get('TESTING') and os.getenv('SKIP_SEED') != '1' and os.getenv('FLASK_ENV') != 'testing':
+            if CdrStatement.query.count() == 0:
+                import glob
+                candidate_paths = [
+                    '/Users/om/Documents/workspaces/cf/cr/*.pdf',
+                    '/data/statements/*.pdf',
+                    './cr/*.pdf'
+                ]
+                seed_files = []
+                for cp in candidate_paths:
+                    seed_files.extend(glob.glob(cp))
+                seed_files = sorted(list(set(seed_files)))
+                if seed_files:
+                    app.logger.info(f"Auto-seeding {len(seed_files)} CDR statements for 7760174171...")
+                    for sf in seed_files:
+                        try:
+                            p_data = parse_cdr_pdf(sf, target_subscriber='7760174171')
+                            ingest_cdr_data(p_data, target_subscriber='7760174171')
+                        except Exception as seed_err:
+                            app.logger.warning(f"Error auto-seeding {sf}: {seed_err}")
     except Exception as e:
         app.logger.warning(f"Startup CDR auto-seed warning: {e}")
 

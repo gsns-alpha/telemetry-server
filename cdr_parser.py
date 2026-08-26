@@ -6,6 +6,7 @@ specifically for target subscriber (e.g. 7760174171).
 
 import os
 import re
+import hashlib
 from datetime import datetime
 import pypdf
 
@@ -65,11 +66,28 @@ def parse_cdr_pdf(pdf_stream_or_path, target_subscriber='7760174171', filename=N
     :param filename: Optional filename label
     :return: dict with metadata, calls list, and sms list
     """
+    file_hash = None
     if isinstance(pdf_stream_or_path, str):
+        if os.path.exists(pdf_stream_or_path):
+            with open(pdf_stream_or_path, 'rb') as f:
+                content = f.read()
+                file_hash = hashlib.sha256(content).hexdigest()
         reader = pypdf.PdfReader(pdf_stream_or_path)
         if not filename:
             filename = os.path.basename(pdf_stream_or_path)
     else:
+        try:
+            if hasattr(pdf_stream_or_path, 'getvalue'):
+                file_hash = hashlib.sha256(pdf_stream_or_path.getvalue()).hexdigest()
+            elif hasattr(pdf_stream_or_path, 'read'):
+                pos = pdf_stream_or_path.tell() if hasattr(pdf_stream_or_path, 'tell') else 0
+                content = pdf_stream_or_path.read()
+                file_hash = hashlib.sha256(content).hexdigest()
+                if hasattr(pdf_stream_or_path, 'seek'):
+                    pdf_stream_or_path.seek(pos)
+        except Exception:
+            file_hash = None
+
         reader = pypdf.PdfReader(pdf_stream_or_path)
         if not filename:
             filename = getattr(pdf_stream_or_path, 'filename', 'statement.pdf')
@@ -228,6 +246,7 @@ def parse_cdr_pdf(pdf_stream_or_path, target_subscriber='7760174171', filename=N
 
     return {
         'filename': filename,
+        'file_hash': file_hash,
         'bill_period': bill_period,
         'bill_no': bill_no,
         'bill_date': bill_date,

@@ -1114,7 +1114,11 @@
             });
             const data = await res.json();
             if (data.status === 'success') {
-                alert(`Successfully processed ${data.files_processed} files!\nAdded ${data.total_calls_added} outgoing calls and ${data.total_sms_added} sent SMS.`);
+                let msg = `Processed ${data.files_processed} file(s).\nAdded: ${data.total_calls_added} calls, ${data.total_sms_added} SMS.`;
+                if (data.files_skipped > 0) {
+                    msg += `\n(${data.files_skipped} duplicate file(s) ignored, 0 duplicate records inserted).`;
+                }
+                alert(msg);
                 window.location.reload();
             } else {
                 alert(`Import notice: ${data.message}`);
