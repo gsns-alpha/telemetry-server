@@ -462,6 +462,12 @@
                     <span>Geo (LOC)</span>
                 </a>
             </li>
+            <li class="nav-item {% if request.path.startswith('/dashboard/cdr') %}active{% endif %}">
+                <a href="{{ url_for('dashboard_cdr') }}">
+                    <span>📑</span>
+                    <span>Statements (CDR)</span>
+                </a>
+            </li>
         </ul>
 
 

@@ -1,0 +1,1135 @@
+{% extends "base.html" %}
+
+{% block title %}Itemized Telecom Statements (CDR) — DevicePulse{% endblock %}
+
+{% block content %}
+<style>
+    .cdr-container {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    /* Top Hero / Header */
+    .cdr-hero {
+        background: linear-gradient(135deg, rgba(16, 24, 39, 0.9) 0%, rgba(30, 41, 59, 0.8) 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 1.5rem 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+
+    .cdr-title-group h1 {
+        font-size: 1.75rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        color: #f8fafc;
+    }
+
+    .subscriber-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: rgba(14, 165, 233, 0.15);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        padding: 0.35rem 0.85rem;
+        border-radius: 9999px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        font-family: monospace;
+    }
+
+    .cdr-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .btn-action {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.6rem 1.1rem;
+        border-radius: 10px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: 1px solid transparent;
+        text-decoration: none;
+    }
+
+    .btn-primary-action {
+        background: linear-gradient(135deg, #0ea5e9, #0284c7);
+        color: #ffffff;
+        box-shadow: 0 4px 14px rgba(14, 165, 233, 0.35);
+    }
+    .btn-primary-action:hover {
+        background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+        box-shadow: 0 6px 20px rgba(14, 165, 233, 0.5);
+        transform: translateY(-1px);
+    }
+
+    .btn-secondary-action {
+        background: rgba(30, 41, 59, 0.8);
+        color: #e2e8f0;
+        border-color: rgba(255, 255, 255, 0.12);
+    }
+    .btn-secondary-action:hover {
+        background: rgba(51, 65, 85, 0.9);
+        color: #ffffff;
+        border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    /* KPI Metrics Cards */
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+    }
+
+    .kpi-card {
+        background: rgba(15, 23, 42, 0.75);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 14px;
+        padding: 1.25rem 1.5rem;
+        backdrop-filter: blur(12px);
+        transition: transform 0.2s ease, border-color 0.2s ease;
+        position: relative;
+        overflow: hidden;
+    }
+    .kpi-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+    }
+    .kpi-card.calls::before { background: linear-gradient(90deg, #10b981, #059669); }
+    .kpi-card.duration::before { background: linear-gradient(90deg, #38bdf8, #2563eb); }
+    .kpi-card.sms::before { background: linear-gradient(90deg, #f59e0b, #d97706); }
+    .kpi-card.pulses::before { background: linear-gradient(90deg, #ec4899, #a855f7); }
+
+    .kpi-card:hover {
+        transform: translateY(-2px);
+        border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .kpi-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+        color: #94a3b8;
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .kpi-value {
+        font-size: 1.85rem;
+        font-weight: 800;
+        color: #f8fafc;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+    }
+
+    .kpi-sub {
+        font-size: 0.8rem;
+        color: #64748b;
+        margin-top: 0.35rem;
+    }
+
+    /* Tabs Navigation */
+    .cdr-tabs {
+        display: flex;
+        gap: 0.5rem;
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 0.4rem;
+        border-radius: 12px;
+        flex-wrap: wrap;
+    }
+
+    .cdr-tab-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.6rem 1.2rem;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: #94a3b8;
+        text-decoration: none;
+        transition: all 0.2s ease;
+    }
+    .cdr-tab-link:hover {
+        color: #f8fafc;
+        background: rgba(255, 255, 255, 0.05);
+    }
+    .cdr-tab-link.active {
+        background: #0ea5e9;
+        color: #ffffff;
+        box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+    }
+    .tab-badge {
+        background: rgba(0, 0, 0, 0.25);
+        padding: 0.15rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+
+    /* Filter & Search Toolbar */
+    .filter-card {
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 12px;
+        padding: 1rem 1.25rem;
+    }
+
+    .filter-form {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .search-input-wrap {
+        position: relative;
+        flex: 1;
+        min-width: 240px;
+    }
+
+    .search-input-wrap input {
+        width: 100%;
+        background: rgba(30, 41, 59, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 0.6rem 1rem 0.6rem 2.4rem;
+        color: #f8fafc;
+        font-size: 0.875rem;
+        outline: none;
+        transition: border-color 0.2s;
+    }
+    .search-input-wrap input:focus {
+        border-color: #0ea5e9;
+        box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+    }
+
+    .search-icon-inside {
+        position: absolute;
+        left: 0.8rem;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #64748b;
+        pointer-events: none;
+    }
+
+    .filter-select {
+        background: rgba(30, 41, 59, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 0.6rem 1rem;
+        color: #f8fafc;
+        font-size: 0.875rem;
+        outline: none;
+        cursor: pointer;
+    }
+    .filter-select:focus {
+        border-color: #0ea5e9;
+    }
+
+    /* Modern Data Tables */
+    .table-card {
+        background: rgba(15, 23, 42, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 14px;
+        overflow: hidden;
+        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.4);
+    }
+
+    .cdr-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+        text-align: left;
+    }
+
+    .cdr-table thead th {
+        background: rgba(30, 41, 59, 0.9);
+        color: #94a3b8;
+        font-weight: 600;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 0.9rem 1rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .cdr-table tbody tr {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        transition: background 0.15s ease;
+    }
+    .cdr-table tbody tr:hover {
+        background: rgba(30, 41, 59, 0.5);
+    }
+
+    .cdr-table td {
+        padding: 0.85rem 1rem;
+        color: #cbd5e1;
+        vertical-align: middle;
+    }
+
+    .phone-number-badge {
+        font-family: monospace;
+        font-weight: 700;
+        color: #38bdf8;
+        font-size: 0.9rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        text-decoration: none;
+    }
+    .phone-number-badge:hover {
+        text-decoration: underline;
+        color: #7dd3fc;
+    }
+
+    .category-badge {
+        display: inline-block;
+        padding: 0.25rem 0.6rem;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        background: rgba(51, 65, 85, 0.7);
+        color: #94a3b8;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .category-badge.local { background: rgba(16, 185, 129, 0.15); color: #34d399; border-color: rgba(16, 185, 129, 0.3); }
+    .category-badge.std { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border-color: rgba(59, 130, 246, 0.3); }
+    .category-badge.roaming { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3); }
+    .category-badge.special { background: rgba(236, 72, 153, 0.15); color: #f472b6; border-color: rgba(236, 72, 153, 0.3); }
+
+    .operator-badge {
+        font-size: 0.75rem;
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        background: rgba(245, 158, 11, 0.1);
+        color: #fcd34d;
+        border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+
+    .duration-pill {
+        font-family: monospace;
+        font-weight: 700;
+        color: #f8fafc;
+        background: rgba(15, 23, 42, 0.6);
+        padding: 0.2rem 0.5rem;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    /* Rankings Grid for Analytics Tab */
+    .rankings-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .ranking-card {
+        background: rgba(15, 23, 42, 0.75);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 14px;
+        padding: 1.25rem 1.5rem;
+    }
+
+    .ranking-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .ranking-card-header h3 {
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #f8fafc;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .ranking-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.6rem 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .ranking-pos {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        font-weight: 700;
+        margin-right: 0.6rem;
+    }
+    .pos-1 { background: #eab308; color: #000; }
+    .pos-2 { background: #94a3b8; color: #000; }
+    .pos-3 { background: #b45309; color: #fff; }
+    .pos-other { background: rgba(255, 255, 255, 0.08); color: #94a3b8; }
+
+    /* Drag and Drop Modal */
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.8);
+        backdrop-filter: blur(8px);
+        z-index: 1000;
+        justify-content: center;
+        align-items: center;
+        padding: 1rem;
+    }
+    .modal-overlay.active {
+        display: flex;
+    }
+
+    .modal-box {
+        background: #0f172a;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 18px;
+        max-width: 580px;
+        width: 100%;
+        padding: 2rem;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+        position: relative;
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+
+    .modal-header h2 {
+        margin: 0;
+        font-size: 1.35rem;
+        color: #f8fafc;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .close-modal-btn {
+        background: transparent;
+        border: none;
+        color: #94a3b8;
+        font-size: 1.5rem;
+        cursor: pointer;
+        padding: 0.2rem 0.5rem;
+        border-radius: 6px;
+    }
+    .close-modal-btn:hover {
+        color: #ffffff;
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    .dropzone-area {
+        border: 2px dashed rgba(56, 189, 248, 0.4);
+        border-radius: 12px;
+        padding: 2.5rem 1.5rem;
+        text-align: center;
+        background: rgba(14, 165, 233, 0.03);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .dropzone-area:hover, .dropzone-area.dragover {
+        border-color: #38bdf8;
+        background: rgba(14, 165, 233, 0.08);
+    }
+
+    .dropzone-icon {
+        font-size: 2.75rem;
+        margin-bottom: 0.75rem;
+        color: #38bdf8;
+    }
+
+    .upload-progress {
+        display: none;
+        margin-top: 1.25rem;
+        padding: 1rem;
+        background: rgba(30, 41, 59, 0.6);
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    /* Flash Notice */
+    .flash-alert {
+        padding: 1rem 1.25rem;
+        border-radius: 10px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    .flash-success {
+        background: rgba(16, 185, 129, 0.15);
+        color: #34d399;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .flash-error {
+        background: rgba(239, 68, 68, 0.15);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+</style>
+
+<div class="cdr-container">
+
+    <!-- Flash Messages -->
+    {% if request.args.get('msg') %}
+    <div class="flash-alert flash-success">
+        <span>✅</span>
+        <span>{{ request.args.get('msg') }}</span>
+    </div>
+    {% endif %}
+    {% if request.args.get('error') %}
+    <div class="flash-alert flash-error">
+        <span>⚠️</span>
+        <span>{{ request.args.get('error') }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Top Hero -->
+    <div class="cdr-hero">
+        <div class="cdr-title-group">
+            <h1>
+                <span>📑</span>
+                <span>Itemized Bill Statements (CDR)</span>
+            </h1>
+            <div style="margin-top: 0.4rem; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                <span class="subscriber-pill">
+                    <span>📱</span>
+                    <span>SUBSCRIBER: <strong>{{ target_subscriber }}</strong></span>
+                </span>
+                <span style="color: #64748b; font-size: 0.85rem;">Postpaid Family Invoices & Outgoing Activity</span>
+            </div>
+        </div>
+        <div class="cdr-actions">
+            <button class="btn-action btn-primary-action" onclick="openUploadModal()">
+                <span>📤</span>
+                <span>Upload Statement PDF</span>
+            </button>
+            <button class="btn-action btn-secondary-action" onclick="triggerServerImport()">
+                <span>⚡</span>
+                <span>Scan Server (`cr/`)</span>
+            </button>
+            <a href="{{ url_for('dashboard_cdr_export', type='calls' if tab != 'sms' else 'sms', subscriber=target_subscriber, period=period_filter) }}" class="btn-action btn-secondary-action">
+                <span>💾</span>
+                <span>Export CSV</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- KPI Metrics -->
+    <div class="kpi-grid">
+        <div class="kpi-card calls">
+            <div class="kpi-header">
+                <span>Outgoing Voice Calls</span>
+                <span>📞</span>
+            </div>
+            <div class="kpi-value">{{ "{:,}".format(total_calls_count) }}</div>
+            <div class="kpi-sub">Total dialled calls recorded</div>
+        </div>
+        <div class="kpi-card duration">
+            <div class="kpi-header">
+                <span>Spoken Talk Time</span>
+                <span>⏳</span>
+            </div>
+            <div class="kpi-value">{{ total_spoken_seconds|format_duration }}</div>
+            <div class="kpi-sub">{{ "%.2f"|format(total_spoken_seconds / 3600.0) }} cumulative hours</div>
+        </div>
+        <div class="kpi-card sms">
+            <div class="kpi-header">
+                <span>Sent SMS Messages</span>
+                <span>💬</span>
+            </div>
+            <div class="kpi-value">{{ "{:,}".format(total_sms_count) }}</div>
+            <div class="kpi-sub">Outbound text & service SMS</div>
+        </div>
+        <div class="kpi-card pulses">
+            <div class="kpi-header">
+                <span>Statements & Pulses</span>
+                <span>⚡</span>
+            </div>
+            <div class="kpi-value">{{ "{:,}".format(total_call_pulses + total_sms_pulses) }}</div>
+            <div class="kpi-sub">Across {{ total_statements }} monthly statements</div>
+        </div>
+    </div>
+
+    <!-- Tabs Header -->
+    <div class="cdr-tabs">
+        <a href="{{ url_for('dashboard_cdr', tab='calls', q=query, period=period_filter, category=category_filter, sort=sort_order) }}" class="cdr-tab-link {% if tab == 'calls' %}active{% endif %}">
+            <span>📞 Outgoing Calls</span>
+            <span class="tab-badge">{{ "{:,}".format(total_calls_count) }}</span>
+        </a>
+        <a href="{{ url_for('dashboard_cdr', tab='sms', q=query, period=period_filter, category=category_filter, sort=sort_order) }}" class="cdr-tab-link {% if tab == 'sms' %}active{% endif %}">
+            <span>💬 Sent SMS</span>
+            <span class="tab-badge">{{ "{:,}".format(total_sms_count) }}</span>
+        </a>
+        <a href="{{ url_for('dashboard_cdr', tab='analytics', period=period_filter) }}" class="cdr-tab-link {% if tab == 'analytics' %}active{% endif %}">
+            <span>📊 Top Rankings & Analytics</span>
+        </a>
+        <a href="{{ url_for('dashboard_cdr', tab='statements') }}" class="cdr-tab-link {% if tab == 'statements' %}active{% endif %}">
+            <span>📑 Billing Invoices</span>
+            <span class="tab-badge">{{ total_statements }}</span>
+        </a>
+    </div>
+
+    <!-- TAB 1: CALLS -->
+    {% if tab == 'calls' %}
+    <div class="filter-card">
+        <form method="GET" action="{{ url_for('dashboard_cdr') }}" class="filter-form">
+            <input type="hidden" name="tab" value="calls">
+            
+            <div class="search-input-wrap">
+                <span class="search-icon-inside">🔍</span>
+                <input type="text" name="q" value="{{ query }}" placeholder="Search phone number (e.g. 9718405111, 9824839944), category, or operator...">
+            </div>
+
+            <select name="period" class="filter-select" onchange="this.form.submit()">
+                <option value="">📅 All Billing Cycles ({{ periods|length }})</option>
+                {% for p in periods %}
+                <option value="{{ p }}" {% if period_filter == p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+
+            <select name="category" class="filter-select" onchange="this.form.submit()">
+                <option value="">🏷️ All Call Types</option>
+                {% for cat in call_categories %}
+                <option value="{{ cat }}" {% if category_filter == cat %}selected{% endif %}>{{ cat|truncate(35) }}</option>
+                {% endfor %}
+            </select>
+
+            <select name="sort" class="filter-select" onchange="this.form.submit()">
+                <option value="date_desc" {% if sort_order == 'date_desc' %}selected{% endif %}>🕒 Date (Newest First)</option>
+                <option value="date_asc" {% if sort_order == 'date_asc' %}selected{% endif %}>🕒 Date (Oldest First)</option>
+                <option value="dur_desc" {% if sort_order == 'dur_desc' %}selected{% endif %}>⏳ Duration (Longest First)</option>
+                <option value="dur_asc" {% if sort_order == 'dur_asc' %}selected{% endif %}>⏳ Duration (Shortest First)</option>
+            </select>
+
+            <button type="submit" class="btn-action btn-secondary-action">
+                <span>Filter</span>
+            </button>
+            {% if query or period_filter or category_filter or sort_order != 'date_desc' %}
+            <a href="{{ url_for('dashboard_cdr', tab='calls') }}" class="btn-action btn-secondary-action" style="color: #f87171;">
+                <span>Clear</span>
+            </a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Calls Table -->
+    <div class="table-card">
+        <table class="cdr-table">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">#</th>
+                    <th>Date & Time (IST)</th>
+                    <th>Destination Number</th>
+                    <th>Spoken Duration</th>
+                    <th>Pulses</th>
+                    <th>Amount</th>
+                    <th>Circle / Operator</th>
+                    <th>Classification</th>
+                    <th>Statement Period</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if calls_pagination and calls_pagination.items %}
+                    {% for call, bill_period, filename in calls_pagination.items %}
+                    <tr>
+                        <td style="color: #64748b; font-family: monospace;">{{ call.serial_no or loop.index }}</td>
+                        <td style="font-weight: 500;">
+                            <div>{{ call.occurred_at|to_ist_short }}</div>
+                            <small style="color: #64748b; font-family: monospace;">{{ call.call_date_str }} {{ call.call_time_str }}</small>
+                        </td>
+                        <td>
+                            <a href="{{ url_for('dashboard_cdr', tab='calls', q=call.destination_number) }}" class="phone-number-badge" title="Filter this number">
+                                <span>📞</span>
+                                <span>{{ call.destination_number|highlight(query) }}</span>
+                            </a>
+                        </td>
+                        <td>
+                            <span class="duration-pill">{{ call.duration_str }}</span>
+                            <small style="color: #64748b; margin-left: 0.3rem;">({{ call.duration_sec }}s)</small>
+                        </td>
+                        <td style="font-weight: 600;">{{ call.pulse }}</td>
+                        <td style="color: #10b981; font-weight: 600;">₹{{ "%.2f"|format(call.amount|float) }}</td>
+                        <td>
+                            {% if call.operator %}
+                            <span class="operator-badge">📡 {{ call.operator|highlight(query) }}</span>
+                            {% else %}
+                            <span style="color: #64748b;">Local Circle</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set cat_lower = (call.call_category or '')|lower %}
+                            <span class="category-badge {% if 'roaming' in cat_lower %}roaming{% elif 'std' in cat_lower %}std{% elif 'special' in cat_lower %}special{% else %}local{% endif %}">
+                                {{ call.call_category|truncate(35) }}
+                            </span>
+                        </td>
+                        <td>
+                            <span style="font-size: 0.8rem; color: #94a3b8;" title="{{ filename }}">{{ bill_period }}</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="9" style="text-align: center; padding: 3rem 1rem; color: #64748b;">
+                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">📭</div>
+                            <div style="font-size: 1rem; font-weight: 600; color: #94a3b8;">No Call Records Found</div>
+                            <p style="margin: 0.5rem 0 0 0; font-size: 0.85rem;">Upload a PDF bill or adjust your search filters above.</p>
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+
+        <!-- Pagination -->
+        {% if calls_pagination and calls_pagination.pages > 1 %}
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-top: 1px solid rgba(255,255,255,0.06); font-size: 0.85rem; color: #94a3b8;">
+            <div>Showing page <strong>{{ calls_pagination.page }}</strong> of <strong>{{ calls_pagination.pages }}</strong> ({{ "{:,}".format(calls_pagination.total) }} total records)</div>
+            <div style="display: flex; gap: 0.5rem;">
+                {% if calls_pagination.has_prev %}
+                <a href="{{ url_for('dashboard_cdr', tab='calls', page=calls_pagination.prev_num, q=query, period=period_filter, category=category_filter, sort=sort_order) }}" class="btn-action btn-secondary-action" style="padding: 0.35rem 0.75rem;">← Prev</a>
+                {% endif %}
+                {% if calls_pagination.has_next %}
+                <a href="{{ url_for('dashboard_cdr', tab='calls', page=calls_pagination.next_num, q=query, period=period_filter, category=category_filter, sort=sort_order) }}" class="btn-action btn-secondary-action" style="padding: 0.35rem 0.75rem;">Next →</a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- TAB 2: SENT SMS -->
+    {% elif tab == 'sms' %}
+    <div class="filter-card">
+        <form method="GET" action="{{ url_for('dashboard_cdr') }}" class="filter-form">
+            <input type="hidden" name="tab" value="sms">
+            
+            <div class="search-input-wrap">
+                <span class="search-icon-inside">🔍</span>
+                <input type="text" name="q" value="{{ query }}" placeholder="Search destination / shortcode (e.g. 52263, 7302722441)...">
+            </div>
+
+            <select name="period" class="filter-select" onchange="this.form.submit()">
+                <option value="">📅 All Billing Cycles ({{ periods|length }})</option>
+                {% for p in periods %}
+                <option value="{{ p }}" {% if period_filter == p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+
+            <select name="category" class="filter-select" onchange="this.form.submit()">
+                <option value="">🏷️ All SMS Categories</option>
+                {% for cat in sms_categories %}
+                <option value="{{ cat }}" {% if category_filter == cat %}selected{% endif %}>{{ cat }}</option>
+                {% endfor %}
+            </select>
+
+            <select name="sort" class="filter-select" onchange="this.form.submit()">
+                <option value="date_desc" {% if sort_order == 'date_desc' %}selected{% endif %}>🕒 Date (Newest First)</option>
+                <option value="date_asc" {% if sort_order == 'date_asc' %}selected{% endif %}>🕒 Date (Oldest First)</option>
+            </select>
+
+            <button type="submit" class="btn-action btn-secondary-action">Filter</button>
+            {% if query or period_filter or category_filter or sort_order != 'date_desc' %}
+            <a href="{{ url_for('dashboard_cdr', tab='sms') }}" class="btn-action btn-secondary-action" style="color: #f87171;">Clear</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- SMS Table -->
+    <div class="table-card">
+        <table class="cdr-table">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">#</th>
+                    <th>Date & Time (IST)</th>
+                    <th>Destination / Shortcode</th>
+                    <th>SMS Count</th>
+                    <th>Pulses</th>
+                    <th>Amount</th>
+                    <th>Circle / Operator</th>
+                    <th>Classification</th>
+                    <th>Statement Period</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if sms_pagination and sms_pagination.items %}
+                    {% for sms_msg, bill_period, filename in sms_pagination.items %}
+                    <tr>
+                        <td style="color: #64748b; font-family: monospace;">{{ sms_msg.serial_no or loop.index }}</td>
+                        <td style="font-weight: 500;">
+                            <div>{{ sms_msg.occurred_at|to_ist_short }}</div>
+                            <small style="color: #64748b; font-family: monospace;">{{ sms_msg.sms_date_str }} {{ sms_msg.sms_time_str }}</small>
+                        </td>
+                        <td>
+                            <a href="{{ url_for('dashboard_cdr', tab='sms', q=sms_msg.destination_number) }}" class="phone-number-badge" title="Filter this number/shortcode">
+                                <span>💬</span>
+                                <span>{{ sms_msg.destination_number|highlight(query) }}</span>
+                            </a>
+                        </td>
+                        <td style="font-weight: 700; color: #f59e0b;">{{ sms_msg.sms_count }}</td>
+                        <td style="font-weight: 600;">{{ sms_msg.pulse }}</td>
+                        <td style="color: #10b981; font-weight: 600;">₹{{ "%.2f"|format(sms_msg.amount|float) }}</td>
+                        <td>
+                            {% if sms_msg.operator %}
+                            <span class="operator-badge">📡 {{ sms_msg.operator|highlight(query) }}</span>
+                            {% else %}
+                            <span style="color: #64748b;">Local Circle</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="category-badge {% if 'roaming' in (sms_msg.sms_category|lower) %}roaming{% elif 'national' in (sms_msg.sms_category|lower) %}std{% elif 'other' in (sms_msg.sms_category|lower) %}special{% else %}local{% endif %}">
+                                {{ sms_msg.sms_category }}
+                            </span>
+                        </td>
+                        <td>
+                            <span style="font-size: 0.8rem; color: #94a3b8;" title="{{ filename }}">{{ bill_period }}</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="9" style="text-align: center; padding: 3rem 1rem; color: #64748b;">
+                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">📭</div>
+                            <div style="font-size: 1rem; font-weight: 600; color: #94a3b8;">No Sent SMS Records Found</div>
+                            <p style="margin: 0.5rem 0 0 0; font-size: 0.85rem;">Upload a PDF bill or adjust your search filters above.</p>
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+
+        <!-- Pagination -->
+        {% if sms_pagination and sms_pagination.pages > 1 %}
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-top: 1px solid rgba(255,255,255,0.06); font-size: 0.85rem; color: #94a3b8;">
+            <div>Showing page <strong>{{ sms_pagination.page }}</strong> of <strong>{{ sms_pagination.pages }}</strong> ({{ "{:,}".format(sms_pagination.total) }} total records)</div>
+            <div style="display: flex; gap: 0.5rem;">
+                {% if sms_pagination.has_prev %}
+                <a href="{{ url_for('dashboard_cdr', tab='sms', page=sms_pagination.prev_num, q=query, period=period_filter, category=category_filter, sort=sort_order) }}" class="btn-action btn-secondary-action" style="padding: 0.35rem 0.75rem;">← Prev</a>
+                {% endif %}
+                {% if sms_pagination.has_next %}
+                <a href="{{ url_for('dashboard_cdr', tab='sms', page=sms_pagination.next_num, q=query, period=period_filter, category=category_filter, sort=sort_order) }}" class="btn-action btn-secondary-action" style="padding: 0.35rem 0.75rem;">Next →</a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- TAB 3: ANALYTICS & RANKINGS -->
+    {% elif tab == 'analytics' %}
+    <div class="rankings-grid">
+        <!-- Top 15 by Call Count -->
+        <div class="ranking-card">
+            <div class="ranking-card-header">
+                <h3><span>🥇</span> Top Numbers by Call Frequency</h3>
+                <span style="font-size: 0.8rem; color: #94a3b8;">Highest volume</span>
+            </div>
+            <div>
+                {% for item in top_called_numbers %}
+                <div class="ranking-item">
+                    <div style="display: flex; align-items: center;">
+                        <span class="ranking-pos {% if loop.index == 1 %}pos-1{% elif loop.index == 2 %}pos-2{% elif loop.index == 3 %}pos-3{% else %}pos-other{% endif %}">{{ loop.index }}</span>
+                        <a href="{{ url_for('dashboard_cdr', tab='calls', q=item.destination_number) }}" class="phone-number-badge">{{ item.destination_number }}</a>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <span class="duration-pill">{{ item.total_duration|format_duration }}</span>
+                        <span style="font-weight: 700; color: #38bdf8; min-width: 60px; text-align: right;">{{ item.call_count }} calls</span>
+                    </div>
+                </div>
+                {% else %}
+                <p style="color: #64748b; text-align: center; padding: 2rem 0;">No call data available.</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Top 15 by Duration -->
+        <div class="ranking-card">
+            <div class="ranking-card-header">
+                <h3><span>⏳</span> Top Numbers by Spoken Duration</h3>
+                <span style="font-size: 0.8rem; color: #94a3b8;">Cumulative talk time</span>
+            </div>
+            <div>
+                {% for item in top_duration_numbers %}
+                <div class="ranking-item">
+                    <div style="display: flex; align-items: center;">
+                        <span class="ranking-pos {% if loop.index == 1 %}pos-1{% elif loop.index == 2 %}pos-2{% elif loop.index == 3 %}pos-3{% else %}pos-other{% endif %}">{{ loop.index }}</span>
+                        <a href="{{ url_for('dashboard_cdr', tab='calls', q=item.destination_number) }}" class="phone-number-badge">{{ item.destination_number }}</a>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 1rem;">
+                        <span style="color: #94a3b8; font-size: 0.8rem;">{{ item.call_count }} calls</span>
+                        <span class="duration-pill" style="color: #38bdf8; font-weight: 700;">{{ item.total_duration|format_duration }}</span>
+                    </div>
+                </div>
+                {% else %}
+                <p style="color: #64748b; text-align: center; padding: 2rem 0;">No call data available.</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Top 15 SMS Destinations -->
+        <div class="ranking-card" style="grid-column: 1 / -1;">
+            <div class="ranking-card-header">
+                <h3><span>💬</span> Top Sent SMS Destinations & Shortcodes</h3>
+                <span style="font-size: 0.8rem; color: #94a3b8;">Outbound message frequency</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.75rem;">
+                {% for item in top_sms_destinations %}
+                <div class="ranking-item" style="background: rgba(30, 41, 59, 0.4); padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+                    <div style="display: flex; align-items: center;">
+                        <span class="ranking-pos {% if loop.index == 1 %}pos-1{% elif loop.index == 2 %}pos-2{% elif loop.index == 3 %}pos-3{% else %}pos-other{% endif %}">{{ loop.index }}</span>
+                        <a href="{{ url_for('dashboard_cdr', tab='sms', q=item.destination_number) }}" class="phone-number-badge">{{ item.destination_number }}</a>
+                    </div>
+                    <div>
+                        <span style="font-weight: 700; color: #f59e0b;">{{ item.sms_count }} msgs</span>
+                    </div>
+                </div>
+                {% else %}
+                <p style="color: #64748b; text-align: center; padding: 2rem 0;">No SMS data available.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB 4: BILLING STATEMENTS -->
+    {% elif tab == 'statements' %}
+    <div class="table-card">
+        <table class="cdr-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Statement Filename</th>
+                    <th>Billing Period</th>
+                    <th>Bill Number</th>
+                    <th>Subscriber</th>
+                    <th>Outgoing Calls</th>
+                    <th>Sent SMS</th>
+                    <th>Spoken Talk Time</th>
+                    <th>Uploaded At</th>
+                    <th style="text-align: right;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stmt in statements %}
+                <tr>
+                    <td style="color: #64748b;">{{ loop.index }}</td>
+                    <td style="font-weight: 600; color: #f8fafc;">
+                        <span>📄 {{ stmt.filename }}</span>
+                    </td>
+                    <td>
+                        <span style="font-weight: 600; color: #38bdf8;">{{ stmt.bill_period }}</span>
+                    </td>
+                    <td style="font-family: monospace; color: #94a3b8;">{{ stmt.bill_no or '—' }}</td>
+                    <td>
+                        <span class="subscriber-pill" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">{{ stmt.target_subscriber }}</span>
+                    </td>
+                    <td style="font-weight: 700; color: #10b981;">{{ "{:,}".format(stmt.total_calls) }}</td>
+                    <td style="font-weight: 700; color: #f59e0b;">{{ "{:,}".format(stmt.total_sms) }}</td>
+                    <td>
+                        <span class="duration-pill">{{ stmt.total_duration_sec|format_duration }}</span>
+                    </td>
+                    <td style="color: #64748b; font-size: 0.8rem;">{{ stmt.uploaded_at|to_ist_short }}</td>
+                    <td style="text-align: right;">
+                        <form method="POST" action="{{ url_for('dashboard_cdr_delete', statement_id=stmt.id) }}" onsubmit="return confirm('Are you sure you want to delete statement {{ stmt.filename }} and all its call records?');" style="display: inline;">
+                            <button type="submit" class="btn-action" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); padding: 0.3rem 0.6rem; font-size: 0.75rem;">
+                                🗑️ Delete
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="10" style="text-align: center; padding: 3rem 1rem; color: #64748b;">
+                        <div style="font-size: 2rem; margin-bottom: 0.5rem;">📂</div>
+                        <div style="font-size: 1rem; font-weight: 600; color: #94a3b8;">No Statements Uploaded</div>
+                        <p style="margin: 0.5rem 0 0 0; font-size: 0.85rem;">Click "Upload Statement PDF" above to ingest a new PDF statement.</p>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+</div>
+
+<!-- Upload Statement Modal -->
+<div id="uploadModal" class="modal-overlay" onclick="if(event.target === this) closeUploadModal();">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2>
+                <span>📤</span>
+                <span>Upload Statement PDF</span>
+            </h2>
+            <button class="close-modal-btn" onclick="closeUploadModal()">✕</button>
+        </div>
+
+        <form id="uploadForm" method="POST" action="{{ url_for('dashboard_cdr_upload') }}" enctype="multipart/form-data">
+            <div style="margin-bottom: 1.25rem;">
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #94a3b8; margin-bottom: 0.4rem;">
+                    Target Subscriber Mobile Number:
+                </label>
+                <input type="text" name="target_subscriber" value="7760174171" required style="width: 100%; background: #1e293b; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 0.6rem 0.85rem; color: #f8fafc; font-family: monospace; font-size: 1rem; font-weight: 700;">
+                <small style="color: #64748b; font-size: 0.75rem; margin-top: 0.25rem; display: block;">
+                    Only outgoing calls and sent SMS originating from this number will be extracted.
+                </small>
+            </div>
+
+            <div class="dropzone-area" id="dropzone" onclick="document.getElementById('fileInput').click();">
+                <div class="dropzone-icon">📄</div>
+                <div style="font-weight: 700; font-size: 1.05rem; color: #f8fafc; margin-bottom: 0.35rem;">
+                    Choose PDF Statement or Drag & Drop Here
+                </div>
+                <div style="font-size: 0.8rem; color: #94a3b8;">
+                    Supports single or multiple monthly tax invoices (e.g. Airtel/Jio postpaid PDFs)
+                </div>
+                <input type="file" id="fileInput" name="statement_files" accept=".pdf" multiple style="display: none;" onchange="handleFilesSelected(this.files)">
+            </div>
+
+            <div id="fileListDisplay" style="margin-top: 1rem; font-size: 0.85rem; color: #38bdf8; display: none;"></div>
+
+            <div id="uploadProgress" class="upload-progress">
+                <div style="display: flex; align-items: center; gap: 0.75rem; color: #38bdf8; font-weight: 600;">
+                    <span style="animation: spin 1s linear infinite; display: inline-block;">⚙️</span>
+                    <span id="progressText">Extracting call detail records from PDF...</span>
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+                <button type="button" class="btn-action btn-secondary-action" onclick="closeUploadModal()">Cancel</button>
+                <button type="submit" id="submitUploadBtn" class="btn-action btn-primary-action" disabled>
+                    <span>⚡ Process & Ingest</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function openUploadModal() {
+        document.getElementById('uploadModal').classList.add('active');
+    }
+
+    function closeUploadModal() {
+        document.getElementById('uploadModal').classList.remove('active');
+    }
+
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const fileListDisplay = document.getElementById('fileListDisplay');
+    const submitBtn = document.getElementById('submitUploadBtn');
+    const uploadForm = document.getElementById('uploadForm');
+    const uploadProgress = document.getElementById('uploadProgress');
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropzone.classList.add('dragover');
+        }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropzone.classList.remove('dragover');
+        }, false);
+    });
+
+    dropzone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        fileInput.files = files;
+        handleFilesSelected(files);
+    });
+
+    function handleFilesSelected(files) {
+        if (files && files.length > 0) {
+            let names = Array.from(files).map(f => f.name).join(', ');
+            fileListDisplay.style.display = 'block';
+            fileListDisplay.innerHTML = `<strong>Selected ${files.length} file(s):</strong> ${names}`;
+            submitBtn.removeAttribute('disabled');
+        } else {
+            fileListDisplay.style.display = 'none';
+            submitBtn.setAttribute('disabled', 'true');
+        }
+    }
+
+    uploadForm.addEventListener('submit', () => {
+        uploadProgress.style.display = 'block';
+        submitBtn.setAttribute('disabled', 'true');
+        submitBtn.innerText = 'Processing...';
+    });
+
+    async function triggerServerImport() {
+        if (!confirm('Scan the server directory (/cr) and ingest all statement PDFs for subscriber 7760174171?')) {
+            return;
+        }
+        const formData = new FormData();
+        formData.append('target_subscriber', '7760174171');
+        
+        try {
+            const res = await fetch("{{ url_for('dashboard_cdr_import_local') }}", {
+                method: 'POST',
+                body: formData,
+                headers: { 'Accept': 'application/json' }
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                alert(`Successfully processed ${data.files_processed} files!\nAdded ${data.total_calls_added} outgoing calls and ${data.total_sms_added} sent SMS.`);
+                window.location.reload();
+            } else {
+                alert(`Import notice: ${data.message}`);
+            }
+        } catch (err) {
+            alert('Error triggering server import: ' + err);
+        }
+    }
+</script>
+
+<style>
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+</style>
+
+{% endblock %}

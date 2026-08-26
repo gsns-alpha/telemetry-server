@@ -8,6 +8,8 @@ Flask application that:
 """
 
 
+import csv
+import io
 import os
 import re
 import time
@@ -15,11 +17,13 @@ from datetime import datetime, timezone, timedelta
 from functools import wraps
 
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, render_template, redirect, url_for, session
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session, Response
 from flask_sqlalchemy import SQLAlchemy
 from markupsafe import Markup, escape
 from sqlalchemy import or_, func, desc
 from werkzeug.middleware.proxy_fix import ProxyFix
+
+from cdr_parser import parse_cdr_pdf, format_seconds_to_duration, parse_duration_to_seconds
 
 load_dotenv()
 
@@ -27,6 +31,23 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+@app.template_filter('format_duration')
+def format_duration_filter(sec):
+    if sec is None:
+        return '00:00'
+    try:
+        sec = int(sec)
+    except (ValueError, TypeError):
+        return str(sec)
+    if sec >= 3600:
+        h = sec // 3600
+        m = (sec % 3600) // 60
+        s = sec % 60
+        return f"{h}h {m:02d}m {s:02d}s"
+    m = sec // 60
+    s = sec % 60
+    return f"{m:02d}:{s:02d}"
 
 @app.template_filter('to_ist')
 def to_ist_filter(dt, format='%Y-%m-%d %I:%M:%S %p'):
@@ -250,6 +271,67 @@ class CallRecording(db.Model):
     format = db.Column(db.String(16))
     recorded_at = db.Column(db.DateTime, nullable=False, index=True)
     synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ─── Telecom Bill Statements & Itemized CDR Records ─────────────────
+
+class CdrStatement(db.Model):
+    __tablename__ = 'cdr_statements'
+    id = pk_column()
+    filename = db.Column(db.String(256), nullable=False, unique=True, index=True)
+    bill_no = db.Column(db.String(64))
+    account_no = db.Column(db.String(64))
+    bill_period = db.Column(db.String(128), index=True)
+    bill_date = db.Column(db.String(64))
+    target_subscriber = db.Column(db.String(32), default='7760174171', index=True)
+    total_calls = db.Column(db.Integer, default=0)
+    total_sms = db.Column(db.Integer, default=0)
+    total_duration_sec = db.Column(db.Integer, default=0)
+    total_pulses = db.Column(db.Integer, default=0)
+    uploaded_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    calls = db.relationship('CdrCall', backref='statement', lazy='dynamic', cascade='all, delete-orphan')
+    sms_list = db.relationship('CdrSms', backref='statement', lazy='dynamic', cascade='all, delete-orphan')
+
+
+class CdrCall(db.Model):
+    __tablename__ = 'cdr_calls'
+    id = pk_column()
+    statement_id = db.Column(db.Integer, db.ForeignKey('cdr_statements.id', ondelete='CASCADE'), nullable=False, index=True)
+    source_subscriber = db.Column(db.String(32), nullable=False, index=True, default='7760174171')
+    serial_no = db.Column(db.Integer)
+    occurred_at = db.Column(db.DateTime, nullable=False, index=True)
+    call_date_str = db.Column(db.String(32))
+    call_time_str = db.Column(db.String(16))
+    destination_number = db.Column(db.String(32), nullable=False, index=True)
+    duration_str = db.Column(db.String(16), nullable=False)
+    duration_sec = db.Column(db.Integer, nullable=False, default=0)
+    pulse = db.Column(db.Integer, default=1)
+    amount = db.Column(db.Numeric(10, 2), default=0.00)
+    operator = db.Column(db.String(64), nullable=True)
+    call_category = db.Column(db.String(128))
+    page_number = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CdrSms(db.Model):
+    __tablename__ = 'cdr_sms'
+    id = pk_column()
+    statement_id = db.Column(db.Integer, db.ForeignKey('cdr_statements.id', ondelete='CASCADE'), nullable=False, index=True)
+    source_subscriber = db.Column(db.String(32), nullable=False, index=True, default='7760174171')
+    serial_no = db.Column(db.Integer)
+    occurred_at = db.Column(db.DateTime, nullable=False, index=True)
+    sms_date_str = db.Column(db.String(32))
+    sms_time_str = db.Column(db.String(16))
+    destination_number = db.Column(db.String(32), nullable=False, index=True)
+    sms_count = db.Column(db.Integer, default=1)
+    pulse = db.Column(db.Integer, default=1)
+    amount = db.Column(db.Numeric(10, 2), default=0.00)
+    operator = db.Column(db.String(64), nullable=True)
+    sms_category = db.Column(db.String(128))
+    page_number = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
 
 
 # ─── Auth Helpers ────────────────────────────────────────────────────
@@ -880,6 +962,415 @@ def dashboard_gps():
                            current_state=state_filter)
 
 
+# ─── Itemized Bill & CDR Processing ──────────────────────────────────
+
+def ingest_cdr_data(parsed_data, target_subscriber='7760174171'):
+    """
+    Ingests parsed statement data into cdr_statements, cdr_calls, and cdr_sms tables.
+    Replaces existing records for the same statement filename to ensure consistency.
+    """
+    filename = parsed_data.get('filename')
+    if not filename:
+        return {'status': 'error', 'message': 'Missing filename'}
+
+    statement = CdrStatement.query.filter_by(filename=filename).first()
+    if not statement:
+        statement = CdrStatement(
+            filename=filename,
+            bill_no=parsed_data.get('bill_no'),
+            account_no=parsed_data.get('account_no'),
+            bill_period=parsed_data.get('bill_period'),
+            bill_date=parsed_data.get('bill_date'),
+            target_subscriber=target_subscriber,
+            total_calls=parsed_data.get('total_calls', 0),
+            total_sms=parsed_data.get('total_sms', 0),
+            total_duration_sec=parsed_data.get('total_duration_sec', 0),
+            total_pulses=parsed_data.get('total_call_pulses', 0) + parsed_data.get('total_sms_pulses', 0),
+            uploaded_at=datetime.now(timezone.utc)
+        )
+        db.session.add(statement)
+        db.session.flush()
+    else:
+        statement.bill_no = parsed_data.get('bill_no')
+        statement.account_no = parsed_data.get('account_no')
+        statement.bill_period = parsed_data.get('bill_period')
+        statement.bill_date = parsed_data.get('bill_date')
+        statement.target_subscriber = target_subscriber
+        statement.total_calls = parsed_data.get('total_calls', 0)
+        statement.total_sms = parsed_data.get('total_sms', 0)
+        statement.total_duration_sec = parsed_data.get('total_duration_sec', 0)
+        statement.total_pulses = parsed_data.get('total_call_pulses', 0) + parsed_data.get('total_sms_pulses', 0)
+        statement.uploaded_at = datetime.now(timezone.utc)
+        
+        # Clear existing calls and sms for this statement to prevent duplicate accumulation
+        CdrCall.query.filter_by(statement_id=statement.id).delete()
+        CdrSms.query.filter_by(statement_id=statement.id).delete()
+        db.session.flush()
+
+    # Bulk insert calls
+    inserted_calls = 0
+    for c in parsed_data.get('calls', []):
+        call_entry = CdrCall(
+            statement_id=statement.id,
+            source_subscriber=c.get('source_subscriber') or target_subscriber,
+            serial_no=c.get('serial_no'),
+            occurred_at=c.get('occurred_at') or datetime.now(timezone.utc),
+            call_date_str=c.get('call_date_str'),
+            call_time_str=c.get('call_time_str'),
+            destination_number=c.get('destination_number'),
+            duration_str=c.get('duration_str') or '00:00',
+            duration_sec=c.get('duration_sec', 0),
+            pulse=c.get('pulse', 1),
+            amount=c.get('amount', 0.00),
+            operator=c.get('operator'),
+            call_category=c.get('call_category'),
+            page_number=c.get('page_number')
+        )
+        db.session.add(call_entry)
+        inserted_calls += 1
+
+    # Bulk insert sms
+    inserted_sms = 0
+    for s in parsed_data.get('sms', []):
+        sms_entry = CdrSms(
+            statement_id=statement.id,
+            source_subscriber=s.get('source_subscriber') or target_subscriber,
+            serial_no=s.get('serial_no'),
+            occurred_at=s.get('occurred_at') or datetime.now(timezone.utc),
+            sms_date_str=s.get('sms_date_str'),
+            sms_time_str=s.get('sms_time_str'),
+            destination_number=s.get('destination_number'),
+            sms_count=s.get('sms_count', 1),
+            pulse=s.get('pulse', 1),
+            amount=s.get('amount', 0.00),
+            operator=s.get('operator'),
+            sms_category=s.get('sms_category'),
+            page_number=s.get('page_number')
+        )
+        db.session.add(sms_entry)
+        inserted_sms += 1
+
+    db.session.commit()
+    return {
+        'status': 'success',
+        'statement_id': statement.id,
+        'filename': filename,
+        'bill_period': statement.bill_period,
+        'inserted_calls': inserted_calls,
+        'inserted_sms': inserted_sms,
+        'total_duration_sec': statement.total_duration_sec
+    }
+
+
+@app.route('/dashboard/cdr')
+@require_login
+def dashboard_cdr():
+    """Itemized Call Details & Sent SMS Explorer from uploaded statements."""
+    tab = request.args.get('tab', 'calls')  # 'calls', 'sms', 'analytics', 'statements'
+    query_str = request.args.get('q', '').strip()
+    period_filter = request.args.get('period', '').strip()
+    category_filter = request.args.get('category', '').strip()
+    sort_order = request.args.get('sort', 'date_desc')
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+
+    target_sub = request.args.get('subscriber', '7760174171').strip() or '7760174171'
+
+    # Overall Summary Statistics
+    total_statements = CdrStatement.query.count()
+    total_calls_count = db.session.query(func.count(CdrCall.id)).filter(CdrCall.source_subscriber == target_sub).scalar() or 0
+    total_sms_count = db.session.query(func.count(CdrSms.id)).filter(CdrSms.source_subscriber == target_sub).scalar() or 0
+    total_spoken_seconds = db.session.query(func.sum(CdrCall.duration_sec)).filter(CdrCall.source_subscriber == target_sub).scalar() or 0
+    total_call_pulses = db.session.query(func.sum(CdrCall.pulse)).filter(CdrCall.source_subscriber == target_sub).scalar() or 0
+    total_sms_pulses = db.session.query(func.sum(CdrSms.pulse)).filter(CdrSms.source_subscriber == target_sub).scalar() or 0
+
+    # Statements & Billing Periods
+    statements = CdrStatement.query.order_by(CdrStatement.id.desc()).all()
+    periods_raw = db.session.query(CdrStatement.bill_period).distinct().order_by(CdrStatement.bill_period).all()
+    periods = [p[0] for p in periods_raw if p[0]]
+
+    # Categories for filters
+    call_categories = [c[0] for c in db.session.query(CdrCall.call_category).distinct().order_by(CdrCall.call_category).all() if c[0]]
+    sms_categories = [s[0] for s in db.session.query(CdrSms.sms_category).distinct().order_by(CdrSms.sms_category).all() if s[0]]
+
+    # Top Destinations for Analytics tab / rankings
+    top_called_numbers = db.session.query(
+        CdrCall.destination_number,
+        func.count(CdrCall.id).label('call_count'),
+        func.sum(CdrCall.duration_sec).label('total_duration'),
+        func.sum(CdrCall.pulse).label('total_pulses')
+    ).filter(CdrCall.source_subscriber == target_sub)\
+     .group_by(CdrCall.destination_number)\
+     .order_by(desc('call_count'))\
+     .limit(15).all()
+
+    top_duration_numbers = db.session.query(
+        CdrCall.destination_number,
+        func.count(CdrCall.id).label('call_count'),
+        func.sum(CdrCall.duration_sec).label('total_duration'),
+        func.sum(CdrCall.pulse).label('total_pulses')
+    ).filter(CdrCall.source_subscriber == target_sub)\
+     .group_by(CdrCall.destination_number)\
+     .order_by(desc('total_duration'))\
+     .limit(15).all()
+
+    top_sms_destinations = db.session.query(
+        CdrSms.destination_number,
+        func.count(CdrSms.id).label('sms_count'),
+        func.sum(CdrSms.pulse).label('total_pulses')
+    ).filter(CdrSms.source_subscriber == target_sub)\
+     .group_by(CdrSms.destination_number)\
+     .order_by(desc('sms_count'))\
+     .limit(15).all()
+
+    calls_pagination = None
+    sms_pagination = None
+
+    if tab == 'calls' or tab not in ['sms', 'analytics', 'statements']:
+        cq = db.session.query(CdrCall, CdrStatement.bill_period, CdrStatement.filename)\
+            .join(CdrStatement, CdrCall.statement_id == CdrStatement.id)\
+            .filter(CdrCall.source_subscriber == target_sub)
+
+        if query_str:
+            cq = cq.filter(or_(
+                CdrCall.destination_number.ilike(f"%{query_str}%"),
+                CdrCall.call_category.ilike(f"%{query_str}%"),
+                CdrCall.operator.ilike(f"%{query_str}%")
+            ))
+        if period_filter:
+            cq = cq.filter(CdrStatement.bill_period == period_filter)
+        if category_filter:
+            cq = cq.filter(CdrCall.call_category.ilike(f"%{category_filter}%"))
+
+        if sort_order == 'date_asc':
+            cq = cq.order_by(CdrCall.occurred_at.asc())
+        elif sort_order == 'dur_desc':
+            cq = cq.order_by(CdrCall.duration_sec.desc(), CdrCall.occurred_at.desc())
+        elif sort_order == 'dur_asc':
+            cq = cq.order_by(CdrCall.duration_sec.asc(), CdrCall.occurred_at.asc())
+        else: # date_desc
+            cq = cq.order_by(CdrCall.occurred_at.desc())
+
+        calls_pagination = cq.paginate(page=page, per_page=per_page, error_out=False)
+
+    elif tab == 'sms':
+        sq = db.session.query(CdrSms, CdrStatement.bill_period, CdrStatement.filename)\
+            .join(CdrStatement, CdrSms.statement_id == CdrStatement.id)\
+            .filter(CdrSms.source_subscriber == target_sub)
+
+        if query_str:
+            sq = sq.filter(or_(
+                CdrSms.destination_number.ilike(f"%{query_str}%"),
+                CdrSms.sms_category.ilike(f"%{query_str}%"),
+                CdrSms.operator.ilike(f"%{query_str}%")
+            ))
+        if period_filter:
+            sq = sq.filter(CdrStatement.bill_period == period_filter)
+        if category_filter:
+            sq = sq.filter(CdrSms.sms_category.ilike(f"%{category_filter}%"))
+
+        if sort_order == 'date_asc':
+            sq = sq.order_by(CdrSms.occurred_at.asc())
+        else:
+            sq = sq.order_by(CdrSms.occurred_at.desc())
+
+        sms_pagination = sq.paginate(page=page, per_page=per_page, error_out=False)
+
+    return render_template(
+        'cdr_dashboard.html',
+        tab=tab,
+        query=query_str,
+        period_filter=period_filter,
+        category_filter=category_filter,
+        sort_order=sort_order,
+        target_subscriber=target_sub,
+        total_statements=total_statements,
+        total_calls_count=total_calls_count,
+        total_sms_count=total_sms_count,
+        total_spoken_seconds=total_spoken_seconds,
+        total_call_pulses=total_call_pulses,
+        total_sms_pulses=total_sms_pulses,
+        statements=statements,
+        periods=periods,
+        call_categories=call_categories,
+        sms_categories=sms_categories,
+        top_called_numbers=top_called_numbers,
+        top_duration_numbers=top_duration_numbers,
+        top_sms_destinations=top_sms_destinations,
+        calls_pagination=calls_pagination,
+        sms_pagination=sms_pagination
+    )
+
+
+@app.route('/dashboard/cdr/upload', methods=['POST'])
+@require_login
+def dashboard_cdr_upload():
+    """Upload and process one or more PDF statement files."""
+    files = request.files.getlist('statement_files')
+    if not files or all(f.filename == '' for f in files):
+        single_file = request.files.get('statement_file')
+        if single_file and single_file.filename:
+            files = [single_file]
+
+    if not files or all(f.filename == '' for f in files):
+        if request.headers.get('Accept') == 'application/json' or request.is_json:
+            return jsonify({'status': 'error', 'message': 'No files uploaded'}), 400
+        return redirect(url_for('dashboard_cdr', error='No files selected'))
+
+    target_sub = request.form.get('target_subscriber', '7760174171').strip() or '7760174171'
+
+    results = []
+    for f in files:
+        if f and f.filename and f.filename.lower().endswith('.pdf'):
+            try:
+                file_bytes = io.BytesIO(f.read())
+                parsed = parse_cdr_pdf(file_bytes, target_subscriber=target_sub, filename=f.filename)
+                ingest_res = ingest_cdr_data(parsed, target_subscriber=target_sub)
+                results.append(ingest_res)
+            except Exception as e:
+                app.logger.error(f"Failed to parse CDR PDF {f.filename}: {e}", exc_info=True)
+                results.append({'filename': f.filename, 'status': 'error', 'message': str(e)})
+
+    total_calls_added = sum(r.get('inserted_calls', 0) for r in results if r.get('status') == 'success')
+    total_sms_added = sum(r.get('inserted_sms', 0) for r in results if r.get('status') == 'success')
+
+    if request.headers.get('Accept') == 'application/json' or request.is_json:
+        return jsonify({
+            'status': 'success',
+            'files_processed': len(results),
+            'total_calls_added': total_calls_added,
+            'total_sms_added': total_sms_added,
+            'details': results
+        })
+
+    return redirect(url_for('dashboard_cdr', msg=f"Processed {len(results)} statement(s): {total_calls_added} calls, {total_sms_added} SMS added."))
+
+
+@app.route('/dashboard/cdr/import-local', methods=['POST'])
+@require_login
+def dashboard_cdr_import_local():
+    """Scan local directory for statement PDFs and ingest them."""
+    import glob
+    target_sub = request.form.get('target_subscriber', '7760174171').strip() or '7760174171'
+    
+    search_paths = [
+        '/Users/om/Documents/workspaces/cf/cr/*.pdf',
+        '/data/statements/*.pdf',
+        './cr/*.pdf'
+    ]
+    pdf_files = []
+    for sp in search_paths:
+        found = glob.glob(sp)
+        if found:
+            pdf_files.extend(found)
+
+    pdf_files = sorted(list(set(pdf_files)))
+    if not pdf_files:
+        return jsonify({'status': 'error', 'message': 'No statement PDFs found on server path'}), 404
+
+    results = []
+    for pf in pdf_files:
+        try:
+            parsed = parse_cdr_pdf(pf, target_subscriber=target_sub)
+            ingest_res = ingest_cdr_data(parsed, target_subscriber=target_sub)
+            results.append(ingest_res)
+        except Exception as e:
+            app.logger.error(f"Error importing local CDR {pf}: {e}", exc_info=True)
+            results.append({'filename': os.path.basename(pf), 'status': 'error', 'message': str(e)})
+
+    total_calls_added = sum(r.get('inserted_calls', 0) for r in results if r.get('status') == 'success')
+    total_sms_added = sum(r.get('inserted_sms', 0) for r in results if r.get('status') == 'success')
+
+    return jsonify({
+        'status': 'success',
+        'files_processed': len(results),
+        'total_calls_added': total_calls_added,
+        'total_sms_added': total_sms_added,
+        'details': results
+    })
+
+
+@app.route('/dashboard/cdr/export')
+@require_login
+def dashboard_cdr_export():
+    """Export CDR calls or SMS as CSV."""
+    export_type = request.args.get('type', 'calls')
+    target_sub = request.args.get('subscriber', '7760174171').strip() or '7760174171'
+    period = request.args.get('period', '').strip()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    if export_type == 'sms':
+        writer.writerow(['Subscriber', 'Serial No', 'Date', 'Time', 'Timestamp (ISO)', 'Destination / Shortcode', 'Count', 'Pulse', 'Amount (INR)', 'Operator / Roaming Circle', 'Category', 'Statement File', 'Bill Period'])
+        sq = db.session.query(CdrSms, CdrStatement.bill_period, CdrStatement.filename)\
+            .join(CdrStatement, CdrSms.statement_id == CdrStatement.id)\
+            .filter(CdrSms.source_subscriber == target_sub)
+        if period:
+            sq = sq.filter(CdrStatement.bill_period == period)
+        for s, bp, fn in sq.order_by(CdrSms.occurred_at.asc()).all():
+            writer.writerow([
+                s.source_subscriber,
+                s.serial_no,
+                s.sms_date_str,
+                s.sms_time_str,
+                s.occurred_at.isoformat() if s.occurred_at else '',
+                s.destination_number,
+                s.sms_count,
+                s.pulse,
+                f"{float(s.amount or 0):.2f}",
+                s.operator or 'Local Circle',
+                s.sms_category,
+                fn,
+                bp
+            ])
+        csv_data = output.getvalue()
+        return Response(csv_data, mimetype='text/csv', headers={
+            'Content-Disposition': f'attachment; filename=sent_sms_{target_sub}.csv'
+        })
+    else: # calls
+        writer.writerow(['Subscriber', 'Serial No', 'Date', 'Time', 'Timestamp (ISO)', 'Destination Number', 'Duration (Str)', 'Duration (Seconds)', 'Pulse', 'Amount (INR)', 'Operator / Roaming Circle', 'Category', 'Statement File', 'Bill Period'])
+        cq = db.session.query(CdrCall, CdrStatement.bill_period, CdrStatement.filename)\
+            .join(CdrStatement, CdrCall.statement_id == CdrStatement.id)\
+            .filter(CdrCall.source_subscriber == target_sub)
+        if period:
+            cq = cq.filter(CdrStatement.bill_period == period)
+        for c, bp, fn in cq.order_by(CdrCall.occurred_at.asc()).all():
+            writer.writerow([
+                c.source_subscriber,
+                c.serial_no,
+                c.call_date_str,
+                c.call_time_str,
+                c.occurred_at.isoformat() if c.occurred_at else '',
+                c.destination_number,
+                c.duration_str,
+                c.duration_sec,
+                c.pulse,
+                f"{float(c.amount or 0):.2f}",
+                c.operator or 'Local Circle',
+                c.call_category,
+                fn,
+                bp
+            ])
+        csv_data = output.getvalue()
+        return Response(csv_data, mimetype='text/csv', headers={
+            'Content-Disposition': f'attachment; filename=outgoing_calls_{target_sub}.csv'
+        })
+
+
+@app.route('/dashboard/cdr/delete/<int:statement_id>', methods=['POST'])
+@require_login
+def dashboard_cdr_delete(statement_id):
+    """Delete statement and all associated calls and SMS."""
+    stmt = db.session.get(CdrStatement, statement_id)
+    if stmt:
+        filename = stmt.filename
+        db.session.delete(stmt)
+        db.session.commit()
+        return redirect(url_for('dashboard_cdr', msg=f"Deleted statement {filename} and all associated records."))
+    return redirect(url_for('dashboard_cdr', error="Statement not found."))
+
+
 def perform_global_search(query_str, device_id=None, category='all', limit_per_category=100):
     """
     Perform a case-insensitive LIKE search across all telemetry tables:
@@ -1032,6 +1523,42 @@ def perform_global_search(query_str, device_id=None, category='all', limit_per_c
     except Exception:
         pass
 
+    # 8. CDR Statement Calls (Outgoing Itemized Statement Calls)
+    try:
+        cdrq = db.session.query(CdrCall, CdrStatement.bill_period, CdrStatement.filename)\
+            .join(CdrStatement, CdrCall.statement_id == CdrStatement.id)
+        cdrq = cdrq.filter(or_(
+            CdrCall.destination_number.ilike(pattern),
+            CdrCall.source_subscriber.ilike(pattern),
+            CdrCall.operator.ilike(pattern),
+            CdrCall.call_category.ilike(pattern),
+            CdrStatement.bill_period.ilike(pattern),
+            CdrStatement.filename.ilike(pattern)
+        ))
+        results['counts']['cdr_calls'] = cdrq.count()
+        if category in ['all', 'cdr_calls', 'calls', 'statements']:
+            results['records']['cdr_calls'] = cdrq.order_by(CdrCall.occurred_at.desc()).limit(limit_per_category).all()
+    except Exception:
+        pass
+
+    # 9. CDR Statement SMS (Sent Itemized Statement SMS)
+    try:
+        cdrsmsq = db.session.query(CdrSms, CdrStatement.bill_period, CdrStatement.filename)\
+            .join(CdrStatement, CdrSms.statement_id == CdrStatement.id)
+        cdrsmsq = cdrsmsq.filter(or_(
+            CdrSms.destination_number.ilike(pattern),
+            CdrSms.source_subscriber.ilike(pattern),
+            CdrSms.operator.ilike(pattern),
+            CdrSms.sms_category.ilike(pattern),
+            CdrStatement.bill_period.ilike(pattern),
+            CdrStatement.filename.ilike(pattern)
+        ))
+        results['counts']['cdr_sms'] = cdrsmsq.count()
+        if category in ['all', 'cdr_sms', 'sms', 'statements']:
+            results['records']['cdr_sms'] = cdrsmsq.order_by(CdrSms.occurred_at.desc()).limit(limit_per_category).all()
+    except Exception:
+        pass
+
     results['total_count'] = sum(results['counts'].values())
     return results
 
@@ -1098,7 +1625,7 @@ def api_search():
             'content': n.content,
             'category': n.category,
             'received_at': n.received_at.isoformat() if n.received_at else None
-        } for n in search_data['records']['notifications']],
+        } for n in search_data['records'].get('notifications', [])],
         'calls': [{
             'id': c.id,
             'device_id': c.device_id,
@@ -1108,7 +1635,7 @@ def api_search():
             'duration_sec': c.duration_sec,
             'sim_slot': c.sim_slot,
             'occurred_at': c.occurred_at.isoformat() if c.occurred_at else None
-        } for c in search_data['records']['calls']],
+        } for c in search_data['records'].get('calls', [])],
         'sms': [{
             'id': s.id,
             'device_id': s.device_id,
@@ -1118,7 +1645,7 @@ def api_search():
             'sms_type': s.sms_type,
             'sim_slot': s.sim_slot,
             'occurred_at': s.occurred_at.isoformat() if s.occurred_at else None
-        } for s in search_data['records']['sms']],
+        } for s in search_data['records'].get('sms', [])],
         'devices': [{
             'device_id': d.device_id,
             'device_model': d.device_model,
@@ -1128,13 +1655,40 @@ def api_search():
             'is_charging': d.is_charging,
             'is_online': d.is_online,
             'last_ping': d.last_ping.isoformat() if d.last_ping else None
-        } for d in search_data['records']['devices']],
+        } for d in search_data['records'].get('devices', [])],
         'gps': [{
             'id': g.id,
             'device_id': g.device_id,
             'is_enabled': g.is_enabled,
             'occurred_at': g.occurred_at.isoformat() if g.occurred_at else None
-        } for g in search_data['records']['gps']]
+        } for g in search_data['records'].get('gps', [])],
+        'cdr_calls': [{
+            'id': c[0].id,
+            'source_subscriber': c[0].source_subscriber,
+            'destination_number': c[0].destination_number,
+            'duration_str': c[0].duration_str,
+            'duration_sec': c[0].duration_sec,
+            'pulse': c[0].pulse,
+            'amount': float(c[0].amount or 0),
+            'operator': c[0].operator,
+            'call_category': c[0].call_category,
+            'bill_period': c[1],
+            'statement_filename': c[2],
+            'occurred_at': c[0].occurred_at.isoformat() if c[0].occurred_at else None
+        } for c in search_data['records'].get('cdr_calls', [])],
+        'cdr_sms': [{
+            'id': s[0].id,
+            'source_subscriber': s[0].source_subscriber,
+            'destination_number': s[0].destination_number,
+            'sms_count': s[0].sms_count,
+            'pulse': s[0].pulse,
+            'amount': float(s[0].amount or 0),
+            'operator': s[0].operator,
+            'sms_category': s[0].sms_category,
+            'bill_period': s[1],
+            'statement_filename': s[2],
+            'occurred_at': s[0].occurred_at.isoformat() if s[0].occurred_at else None
+        } for s in search_data['records'].get('cdr_sms', [])]
     }
 
     return jsonify({
@@ -1220,7 +1774,32 @@ with app.app_context():
     except Exception as e:
         app.logger.warning(f"Startup DB migration/cleanup warning: {e}")
 
+    # Auto-seed existing statement PDFs from cr/ directory if table is empty
+    try:
+        if CdrStatement.query.count() == 0:
+            import glob
+            candidate_paths = [
+                '/Users/om/Documents/workspaces/cf/cr/*.pdf',
+                '/data/statements/*.pdf',
+                './cr/*.pdf'
+            ]
+            seed_files = []
+            for cp in candidate_paths:
+                seed_files.extend(glob.glob(cp))
+            seed_files = sorted(list(set(seed_files)))
+            if seed_files:
+                app.logger.info(f"Auto-seeding {len(seed_files)} CDR statements for 7760174171...")
+                for sf in seed_files:
+                    try:
+                        p_data = parse_cdr_pdf(sf, target_subscriber='7760174171')
+                        ingest_cdr_data(p_data, target_subscriber='7760174171')
+                    except Exception as seed_err:
+                        app.logger.warning(f"Error auto-seeding {sf}: {seed_err}")
+    except Exception as e:
+        app.logger.warning(f"Startup CDR auto-seed warning: {e}")
+
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+

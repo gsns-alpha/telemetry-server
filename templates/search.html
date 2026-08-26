@@ -284,12 +284,17 @@
                 <span>📍 GPS</span>
                 <span class="tab-badge">{{ search_data.counts.gps }}</span>
             </a>
+            <a href="{{ url_for('dashboard_search', q=query, type='statements', device=current_device) }}" class="search-tab {% if category == 'statements' %}active{% endif %}">
+                <span>📑 CDR Statements</span>
+                <span class="tab-badge">{{ (search_data.counts.cdr_calls or 0) + (search_data.counts.cdr_sms or 0) }}</span>
+            </a>
         </div>
         {% else %}
         <div class="quick-examples">
             <span>Quick search templates:</span>
             <a href="{{ url_for('dashboard_search', q='Airtel') }}" class="example-btn">Airtel</a>
             <a href="{{ url_for('dashboard_search', q='OTP') }}" class="example-btn">OTP</a>
+            <a href="{{ url_for('dashboard_search', q='9718405111') }}" class="example-btn">9718405111</a>
             <a href="{{ url_for('dashboard_search', q='outgoing') }}" class="example-btn">outgoing</a>
             <a href="{{ url_for('dashboard_search', q='incoming') }}" class="example-btn">incoming</a>
             <a href="{{ url_for('dashboard_search', q='whatsapp') }}" class="example-btn">whatsapp</a>
@@ -309,13 +314,18 @@
             <div class="stat-value" style="color: var(--accent-primary);">{{ search_data.total_count }}</div>
             <div class="stat-meta">For query <span class="query-tag">{{ query }}</span></div>
         </div>
+        <div class="stat-card" style="--card-accent: #0ea5e9;">
+            <div class="stat-label">CDR Statements</div>
+            <div class="stat-value" style="color: #0ea5e9;">{{ (search_data.counts.cdr_calls or 0) + (search_data.counts.cdr_sms or 0) }}</div>
+            <div class="stat-meta">Calls: {{ search_data.counts.cdr_calls or 0 }}, SMS: {{ search_data.counts.cdr_sms or 0 }}</div>
+        </div>
         <div class="stat-card" style="--card-accent: #c084fc;">
-            <div class="stat-label">Voice / Calls</div>
+            <div class="stat-label">Live Voice Calls</div>
             <div class="stat-value" style="color: #c084fc;">{{ search_data.counts.calls }}</div>
-            <div class="stat-meta">Matched in call logs</div>
+            <div class="stat-meta">Matched in device call logs</div>
         </div>
         <div class="stat-card" style="--card-accent: var(--accent-green);">
-            <div class="stat-label">Data / SMS</div>
+            <div class="stat-label">Live Data / SMS</div>
             <div class="stat-value" style="color: var(--accent-green);">{{ search_data.counts.sms }}</div>
             <div class="stat-meta">Matched in SMS messages</div>
         </div>
@@ -644,6 +654,130 @@
                         <div style="font-size: 11px; color: var(--text-secondary);"><code>{{ k.app_package|highlight(query) }}</code></div>
                     </td>
                     <td style="word-break: break-word;">{{ k.text|highlight(query) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 7. CDR Statement Outgoing Calls -->
+    {% if search_data.records.cdr_calls and (category == 'all' or category == 'statements' or category == 'calls') %}
+    <div class="card-box">
+        <div class="category-section-title">
+            <h3><span>📑</span> Postpaid Statement Calls (Outgoing CDR)</h3>
+            <span class="results-count-pill" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border-color: rgba(14, 165, 233, 0.3);">
+                {{ search_data.counts.cdr_calls }} records
+            </span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 170px;">Date & Time (IST)</th>
+                    <th style="width: 130px;">Subscriber</th>
+                    <th>Destination Number</th>
+                    <th>Spoken Duration</th>
+                    <th>Pulses</th>
+                    <th>Amount</th>
+                    <th>Circle / Operator</th>
+                    <th>Classification</th>
+                    <th>Statement Period</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for call, bill_period, filename in search_data.records.cdr_calls %}
+                <tr>
+                    <td class="time-text">{{ call.occurred_at|to_ist_short }}</td>
+                    <td><span class="node-pill">📱 {{ call.source_subscriber|highlight(query) }}</span></td>
+                    <td>
+                        <a href="{{ url_for('dashboard_cdr', tab='calls', q=call.destination_number) }}" style="font-family: monospace; font-weight: 700; color: #38bdf8; text-decoration: none;">
+                            📞 {{ call.destination_number|highlight(query) }}
+                        </a>
+                    </td>
+                    <td>
+                        <span style="font-family: monospace; font-weight: 700; color: #f8fafc; background: rgba(15, 23, 42, 0.6); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);">
+                            {{ call.duration_str }}
+                        </span>
+                    </td>
+                    <td style="font-weight: 600;">{{ call.pulse }}</td>
+                    <td style="color: #10b981; font-weight: 600;">₹{{ "%.2f"|format(call.amount|float) }}</td>
+                    <td>
+                        {% if call.operator %}
+                        <span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3);">
+                            📡 {{ call.operator|highlight(query) }}
+                        </span>
+                        {% else %}
+                        <span style="color: var(--text-secondary); font-size: 12px;">Local</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-secondary" style="font-size: 11px;">
+                            {{ call.call_category|truncate(35)|highlight(query) }}
+                        </span>
+                    </td>
+                    <td>
+                        <span style="font-size: 12px; color: var(--text-secondary);" title="{{ filename }}">{{ bill_period|highlight(query) }}</span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 8. CDR Statement Sent SMS -->
+    {% if search_data.records.cdr_sms and (category == 'all' or category == 'statements' or category == 'sms') %}
+    <div class="card-box">
+        <div class="category-section-title">
+            <h3><span>💬</span> Postpaid Statement SMS (Sent CDR)</h3>
+            <span class="results-count-pill" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border-color: rgba(245, 158, 11, 0.3);">
+                {{ search_data.counts.cdr_sms }} records
+            </span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 170px;">Date & Time (IST)</th>
+                    <th style="width: 130px;">Subscriber</th>
+                    <th>Destination / Shortcode</th>
+                    <th>SMS Count</th>
+                    <th>Pulses</th>
+                    <th>Amount</th>
+                    <th>Circle / Operator</th>
+                    <th>Classification</th>
+                    <th>Statement Period</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sms_msg, bill_period, filename in search_data.records.cdr_sms %}
+                <tr>
+                    <td class="time-text">{{ sms_msg.occurred_at|to_ist_short }}</td>
+                    <td><span class="node-pill">📱 {{ sms_msg.source_subscriber|highlight(query) }}</span></td>
+                    <td>
+                        <a href="{{ url_for('dashboard_cdr', tab='sms', q=sms_msg.destination_number) }}" style="font-family: monospace; font-weight: 700; color: #fbbf24; text-decoration: none;">
+                            💬 {{ sms_msg.destination_number|highlight(query) }}
+                        </a>
+                    </td>
+                    <td style="font-weight: 700; color: #f59e0b;">{{ sms_msg.sms_count }}</td>
+                    <td style="font-weight: 600;">{{ sms_msg.pulse }}</td>
+                    <td style="color: #10b981; font-weight: 600;">₹{{ "%.2f"|format(sms_msg.amount|float) }}</td>
+                    <td>
+                        {% if sms_msg.operator %}
+                        <span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3);">
+                            📡 {{ sms_msg.operator|highlight(query) }}
+                        </span>
+                        {% else %}
+                        <span style="color: var(--text-secondary); font-size: 12px;">Local</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-secondary" style="font-size: 11px;">
+                            {{ sms_msg.sms_category|highlight(query) }}
+                        </span>
+                    </td>
+                    <td>
+                        <span style="font-size: 12px; color: var(--text-secondary);" title="{{ filename }}">{{ bill_period|highlight(query) }}</span>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
