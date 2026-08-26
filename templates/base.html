@@ -432,6 +432,12 @@
                     <span>System (SYS)</span>
                 </a>
             </li>
+            <li class="nav-item {% if request.path == '/dashboard/search' %}active{% endif %}">
+                <a href="{{ url_for('dashboard_search') }}">
+                    <span>🔍</span>
+                    <span>Search (QRY)</span>
+                </a>
+            </li>
             <li class="nav-item {% if request.path == '/dashboard/notifications' %}active{% endif %}">
                 <a href="{{ url_for('dashboard_notifications') }}">
                     <span>🔔</span>

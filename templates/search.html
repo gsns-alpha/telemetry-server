@@ -1,0 +1,689 @@
+{% extends 'base.html' %}
+
+{% block title %}Search (QRY) — DevicePulse{% endblock %}
+
+{% block extra_head %}
+<style>
+    .search-panel {
+        background: linear-gradient(180deg, var(--bg-secondary) 0%, rgba(17, 24, 39, 0.6) 100%);
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 24px;
+        margin-bottom: 28px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .search-input-wrapper {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .search-field-container {
+        position: relative;
+        flex: 1;
+        min-width: 280px;
+    }
+
+    .search-field-container .search-icon {
+        position: absolute;
+        left: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-secondary);
+        font-size: 16px;
+        pointer-events: none;
+    }
+
+    .search-input-box {
+        width: 100%;
+        padding: 12px 42px 12px 42px !important;
+        font-size: 14px !important;
+        border-radius: 10px !important;
+        background-color: var(--bg-primary) !important;
+        border: 1px solid var(--border-color) !important;
+        color: var(--text-primary) !important;
+        transition: all 0.2s ease;
+    }
+
+    .search-input-box:focus {
+        border-color: var(--accent-primary) !important;
+        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+    }
+
+    .clear-search-btn {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 16px;
+        cursor: pointer;
+        padding: 4px;
+        line-height: 1;
+    }
+
+    .clear-search-btn:hover {
+        color: var(--text-primary);
+    }
+
+    .search-tabs {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 18px;
+        padding-top: 18px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .search-tab {
+        padding: 6px 14px;
+        border-radius: 20px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 12px;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.15s ease;
+    }
+
+    .search-tab:hover {
+        color: var(--text-primary);
+        border-color: var(--accent-primary);
+        background: rgba(56, 189, 248, 0.08);
+    }
+
+    .search-tab.active {
+        background: var(--accent-primary-dim);
+        color: var(--accent-primary);
+        border-color: rgba(56, 189, 248, 0.4);
+        font-weight: 600;
+    }
+
+    .search-tab .tab-badge {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 1px 6px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: 700;
+    }
+
+    .search-tab.active .tab-badge {
+        background: rgba(56, 189, 248, 0.25);
+        color: #fff;
+    }
+
+    mark.search-highlight, .search-highlight {
+        background-color: rgba(251, 191, 36, 0.35);
+        color: #fef08a;
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-weight: 700;
+    }
+
+    .query-tag {
+        display: inline-block;
+        background: var(--accent-primary-dim);
+        color: var(--accent-primary);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-family: monospace;
+        font-size: 13px;
+    }
+
+    .node-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
+    }
+
+    .category-section-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+    }
+
+    .category-section-title h3 {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .results-count-pill {
+        font-size: 11px;
+        padding: 3px 8px;
+        border-radius: 12px;
+        background: var(--bg-card);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
+        font-weight: 600;
+    }
+
+    .quick-examples {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 12px;
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+
+    .example-btn {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        color: var(--accent-primary);
+        padding: 2px 8px;
+        border-radius: 6px;
+        text-decoration: none;
+        font-size: 11px;
+        font-family: monospace;
+        transition: all 0.15s;
+    }
+
+    .example-btn:hover {
+        background: var(--accent-primary-dim);
+        border-color: var(--accent-primary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="header-bar">
+    <div>
+        <h1 class="page-title">Global Telemetry Search (QRY)</h1>
+        <p class="page-subtitle">Universal case-insensitive pattern matching across Notifications, Calls, SMS, GPS, and Active Nodes</p>
+    </div>
+</div>
+
+<!-- Search Panel -->
+<div class="search-panel">
+    <form method="GET" action="{{ url_for('dashboard_search') }}" id="searchForm">
+        <div class="search-input-wrapper">
+            <div class="search-field-container">
+                <span class="search-icon">🔍</span>
+                <input type="text"
+                       id="mainSearchInput"
+                       name="q"
+                       value="{{ query }}"
+                       placeholder="Search numbers, contacts, messages, apps, titles, device IDs, GPS states (e.g. 'Airtel', '+91', 'OTP')..."
+                       class="search-input-box"
+                       autocomplete="off"
+                       autofocus>
+                {% if query %}
+                <button type="button" class="clear-search-btn" onclick="document.getElementById('mainSearchInput').value=''; document.getElementById('searchForm').submit();" title="Clear query">✕</button>
+                {% endif %}
+            </div>
+
+            <select name="type" style="padding: 11px 14px; font-size: 13px; min-width: 150px;">
+                <option value="all" {% if category == 'all' %}selected{% endif %}>📁 All Tables</option>
+                <option value="calls" {% if category == 'calls' %}selected{% endif %}>📞 Voice (Calls)</option>
+                <option value="sms" {% if category == 'sms' %}selected{% endif %}>💬 Data (SMS)</option>
+                <option value="notifications" {% if category == 'notifications' %}selected{% endif %}>🔔 Events (Notifs)</option>
+                <option value="devices" {% if category == 'devices' %}selected{% endif %}>🖥️ Nodes (Devices)</option>
+                <option value="gps" {% if category == 'gps' %}selected{% endif %}>📍 Geo (GPS)</option>
+            </select>
+
+            <select name="device" style="padding: 11px 14px; font-size: 13px; min-width: 160px;">
+                <option value="all">🖥️ All Nodes</option>
+                {% for d in global_devices %}
+                <option value="{{ d.device_id }}" {% if current_device == d.device_id %}selected{% endif %}>
+                    {{ d.device_model }} ({{ d.device_id|truncate(10) }})
+                </option>
+                {% endfor %}
+            </select>
+
+            <button type="submit" class="btn btn-primary" style="padding: 11px 20px; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                <span>Search</span>
+                <span>➔</span>
+            </button>
+        </div>
+
+        <!-- Category Tabs (shown when query is present) -->
+        {% if query %}
+        <div class="search-tabs">
+            <a href="{{ url_for('dashboard_search', q=query, type='all', device=current_device) }}" class="search-tab {% if category == 'all' %}active{% endif %}">
+                <span>📁 All Results</span>
+                <span class="tab-badge">{{ search_data.total_count }}</span>
+            </a>
+            <a href="{{ url_for('dashboard_search', q=query, type='calls', device=current_device) }}" class="search-tab {% if category == 'calls' %}active{% endif %}">
+                <span>📞 Calls</span>
+                <span class="tab-badge">{{ search_data.counts.calls }}</span>
+            </a>
+            <a href="{{ url_for('dashboard_search', q=query, type='sms', device=current_device) }}" class="search-tab {% if category == 'sms' %}active{% endif %}">
+                <span>💬 SMS</span>
+                <span class="tab-badge">{{ search_data.counts.sms }}</span>
+            </a>
+            <a href="{{ url_for('dashboard_search', q=query, type='notifications', device=current_device) }}" class="search-tab {% if category == 'notifications' %}active{% endif %}">
+                <span>🔔 Notifications</span>
+                <span class="tab-badge">{{ search_data.counts.notifications }}</span>
+            </a>
+            <a href="{{ url_for('dashboard_search', q=query, type='devices', device=current_device) }}" class="search-tab {% if category == 'devices' %}active{% endif %}">
+                <span>🖥️ Nodes</span>
+                <span class="tab-badge">{{ search_data.counts.devices }}</span>
+            </a>
+            <a href="{{ url_for('dashboard_search', q=query, type='gps', device=current_device) }}" class="search-tab {% if category == 'gps' %}active{% endif %}">
+                <span>📍 GPS</span>
+                <span class="tab-badge">{{ search_data.counts.gps }}</span>
+            </a>
+        </div>
+        {% else %}
+        <div class="quick-examples">
+            <span>Quick search templates:</span>
+            <a href="{{ url_for('dashboard_search', q='Airtel') }}" class="example-btn">Airtel</a>
+            <a href="{{ url_for('dashboard_search', q='OTP') }}" class="example-btn">OTP</a>
+            <a href="{{ url_for('dashboard_search', q='outgoing') }}" class="example-btn">outgoing</a>
+            <a href="{{ url_for('dashboard_search', q='incoming') }}" class="example-btn">incoming</a>
+            <a href="{{ url_for('dashboard_search', q='whatsapp') }}" class="example-btn">whatsapp</a>
+            <a href="{{ url_for('dashboard_search', q='Nothing') }}" class="example-btn">Nothing</a>
+            <a href="{{ url_for('dashboard_search', q='gps on') }}" class="example-btn">gps on</a>
+        </div>
+        {% endif %}
+    </form>
+</div>
+
+{% if query %}
+
+    <!-- Metrics Cards Summary -->
+    <div class="grid-cards" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 24px;">
+        <div class="stat-card" style="--card-accent: var(--accent-primary);">
+            <div class="stat-label">Total Matches</div>
+            <div class="stat-value" style="color: var(--accent-primary);">{{ search_data.total_count }}</div>
+            <div class="stat-meta">For query <span class="query-tag">{{ query }}</span></div>
+        </div>
+        <div class="stat-card" style="--card-accent: #c084fc;">
+            <div class="stat-label">Voice / Calls</div>
+            <div class="stat-value" style="color: #c084fc;">{{ search_data.counts.calls }}</div>
+            <div class="stat-meta">Matched in call logs</div>
+        </div>
+        <div class="stat-card" style="--card-accent: var(--accent-green);">
+            <div class="stat-label">Data / SMS</div>
+            <div class="stat-value" style="color: var(--accent-green);">{{ search_data.counts.sms }}</div>
+            <div class="stat-meta">Matched in SMS messages</div>
+        </div>
+        <div class="stat-card" style="--card-accent: #38bdf8;">
+            <div class="stat-label">System Events</div>
+            <div class="stat-value" style="color: #38bdf8;">{{ search_data.counts.notifications }}</div>
+            <div class="stat-meta">Matched in notifications</div>
+        </div>
+        <div class="stat-card" style="--card-accent: var(--accent-amber);">
+            <div class="stat-label">Active Nodes</div>
+            <div class="stat-value" style="color: var(--accent-amber);">{{ search_data.counts.devices }}</div>
+            <div class="stat-meta">Matched device models/IDs</div>
+        </div>
+    </div>
+
+    {% if search_data.total_count == 0 %}
+    <div class="card-box">
+        <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <h3 style="font-size: 16px; margin-bottom: 6px; color: var(--text-primary);">No records matched "{{ query }}"</h3>
+            <p style="font-size: 13px; color: var(--text-secondary);">
+                Try broadening your search term, selecting "All Tables", or searching by partial numbers, words, or SIM carrier names.
+            </p>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 1. Voice / Call Log Results -->
+    {% if search_data.records.calls and (category == 'all' or category == 'calls') %}
+    <div class="card-box">
+        <div class="category-section-title">
+            <h3><span>📞</span> Voice Calls / Call History</h3>
+            <span class="results-count-pill">{{ search_data.counts.calls }} records</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 170px;">Timestamp</th>
+                    <th style="width: 150px;">Node</th>
+                    <th style="width: 170px;">Phone Number</th>
+                    <th style="width: 150px;">Contact</th>
+                    <th style="width: 130px;">Call Type</th>
+                    <th style="width: 100px;">Duration</th>
+                    <th style="width: 130px;">SIM Slot</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in search_data.records.calls %}
+                <tr>
+                    <td class="time-text">{{ c.occurred_at|to_ist if c.occurred_at else '-' }}</td>
+                    <td>
+                        <span class="node-pill">🖥️ {{ device_map.get(c.device_id, c.device_id|truncate(10)) }}</span>
+                    </td>
+                    <td>
+                        <strong>{{ c.phone_number|highlight(query) }}</strong>
+                    </td>
+                    <td>
+                        {% if c.contact_name %}
+                        <span style="color: var(--text-primary);">{{ c.contact_name|highlight(query) }}</span>
+                        {% else %}
+                        <span style="color: var(--text-secondary); font-size: 12px;">Unknown</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if c.call_type == 'incoming' %}
+                        <span class="badge badge-green">Incoming</span>
+                        {% elif c.call_type == 'outgoing' %}
+                        <span class="badge badge-blue">Outgoing</span>
+                        {% elif c.call_type == 'ringing' %}
+                        <span class="badge" style="background: rgba(192, 132, 252, 0.15); color: #c084fc; border: 1px solid rgba(192, 132, 252, 0.3);">🔔 Ringing</span>
+                        {% elif c.call_type == 'missed' %}
+                        <span class="badge badge-red">Missed</span>
+                        {% elif c.call_type == 'rejected' %}
+                        <span class="badge badge-amber">Rejected</span>
+                        {% else %}
+                        <span class="badge">{{ c.call_type|highlight(query) }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if c.duration_sec %}
+                        <span style="font-weight: 600;">{{ c.duration_sec }}s</span>
+                        <span style="color: var(--text-secondary); font-size: 11px;">({{ (c.duration_sec / 60)|round(1) }}m)</span>
+                        {% else %}
+                        <span style="color: var(--text-secondary);">0s</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if c.sim_slot %}
+                        <span class="badge" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25); font-size: 10px;">
+                            📶 {{ c.sim_slot|highlight(query) }}
+                        </span>
+                        {% else %}
+                        <span style="color: var(--text-secondary); font-size: 11px;">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 2. Data / SMS Messages Results -->
+    {% if search_data.records.sms and (category == 'all' or category == 'sms') %}
+    <div class="card-box">
+        <div class="category-section-title">
+            <h3><span>💬</span> Data / SMS Messages</h3>
+            <span class="results-count-pill">{{ search_data.counts.sms }} records</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 170px;">Timestamp</th>
+                    <th style="width: 150px;">Node</th>
+                    <th style="width: 160px;">Sender / Number</th>
+                    <th style="width: 130px;">Contact</th>
+                    <th style="width: 110px;">Direction</th>
+                    <th style="width: 130px;">SIM Slot</th>
+                    <th>Message Body</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in search_data.records.sms %}
+                <tr>
+                    <td class="time-text">{{ s.occurred_at|to_ist if s.occurred_at else '-' }}</td>
+                    <td>
+                        <span class="node-pill">🖥️ {{ device_map.get(s.device_id, s.device_id|truncate(10)) }}</span>
+                    </td>
+                    <td>
+                        <strong>{{ s.address|highlight(query) }}</strong>
+                    </td>
+                    <td>
+                        {% if s.contact_name %}
+                        <span style="color: var(--text-primary);">{{ s.contact_name|highlight(query) }}</span>
+                        {% else %}
+                        <span style="color: var(--text-secondary); font-size: 12px;">Unknown</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if s.sms_type == 'inbox' %}
+                        <span class="badge badge-green">Inbound</span>
+                        {% elif s.sms_type == 'sent' %}
+                        <span class="badge badge-blue">Outbound</span>
+                        {% else %}
+                        <span class="badge">{{ s.sms_type|highlight(query) }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if s.sim_slot %}
+                        <span class="badge" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25); font-size: 10px;">
+                            📶 {{ s.sim_slot|highlight(query) }}
+                        </span>
+                        {% else %}
+                        <span style="color: var(--text-secondary); font-size: 11px;">—</span>
+                        {% endif %}
+                    </td>
+                    <td style="word-break: break-word;">
+                        {{ s.body|highlight(query) }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 3. System / App Notifications Results -->
+    {% if search_data.records.notifications and (category == 'all' or category == 'notifications') %}
+    <div class="card-box">
+        <div class="category-section-title">
+            <h3><span>🔔</span> System & Application Notifications</h3>
+            <span class="results-count-pill">{{ search_data.counts.notifications }} records</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 170px;">Timestamp</th>
+                    <th style="width: 150px;">Node</th>
+                    <th style="width: 180px;">Source App</th>
+                    <th style="width: 200px;">Title</th>
+                    <th>Notification Message</th>
+                    <th style="width: 100px;">Category</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for n in search_data.records.notifications %}
+                <tr>
+                    <td class="time-text">{{ n.received_at|to_ist if n.received_at else '-' }}</td>
+                    <td>
+                        <span class="node-pill">🖥️ {{ device_map.get(n.device_id, n.device_id|truncate(10)) }}</span>
+                    </td>
+                    <td>
+                        <strong>{{ n.app_name|highlight(query) if n.app_name else (n.app_package|highlight(query)) }}</strong>
+                        <div style="font-size: 11px; color: var(--text-secondary);"><code>{{ n.app_package|highlight(query) }}</code></div>
+                    </td>
+                    <td><strong style="color: var(--text-primary);">{{ n.title|highlight(query) }}</strong></td>
+                    <td style="word-break: break-word;">{{ n.content|highlight(query) }}</td>
+                    <td>
+                        {% if n.category %}
+                        <span class="badge badge-blue">{{ n.category|highlight(query) }}</span>
+                        {% else %}
+                        <span style="color: var(--text-secondary); font-size: 12px;">default</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 4. Active Nodes / Devices Results -->
+    {% if search_data.records.devices and (category == 'all' or category == 'devices') %}
+    <div class="card-box">
+        <div class="category-section-title">
+            <h3><span>🖥️</span> Nodes & Monitored Devices</h3>
+            <span class="results-count-pill">{{ search_data.counts.devices }} records</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Device Model</th>
+                    <th>Node ID</th>
+                    <th>Android OS</th>
+                    <th>App Version</th>
+                    <th>Battery</th>
+                    <th>Status</th>
+                    <th>Last Heartbeat</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in search_data.records.devices %}
+                <tr>
+                    <td><strong>{{ d.device_model|highlight(query) }}</strong></td>
+                    <td><code>{{ d.device_id|highlight(query) }}</code></td>
+                    <td>Android {{ d.android_version|highlight(query) or '—' }}</td>
+                    <td>v{{ d.app_version|highlight(query) or '1.0.0' }}</td>
+                    <td>
+                        {% if d.battery_level is not none %}
+                        <strong>{{ d.battery_level }}%</strong>
+                        {% if d.is_charging %}<span style="color: var(--accent-amber); font-size: 11px;">⚡</span>{% endif %}
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if d.is_online %}
+                        <span class="badge badge-green">ONLINE</span>
+                        {% else %}
+                        <span class="badge badge-red">OFFLINE</span>
+                        {% endif %}
+                    </td>
+                    <td class="time-text">{{ (d.last_ping or d.last_sync)|to_ist if (d.last_ping or d.last_sync) else 'Never' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 5. Geo / GPS State Logs Results -->
+    {% if search_data.records.gps and (category == 'all' or category == 'gps') %}
+    <div class="card-box">
+        <div class="category-section-title">
+            <h3><span>📍</span> Geo & GPS State Logs</h3>
+            <span class="results-count-pill">{{ search_data.counts.gps }} records</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 180px;">Timestamp</th>
+                    <th style="width: 200px;">Node</th>
+                    <th style="width: 140px;">GPS State</th>
+                    <th>Synced At</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for g in search_data.records.gps %}
+                <tr>
+                    <td class="time-text">{{ g.occurred_at|to_ist if g.occurred_at else '-' }}</td>
+                    <td>
+                        <span class="node-pill">🖥️ {{ device_map.get(g.device_id, g.device_id|truncate(10)) }}</span>
+                        <div style="font-size: 10px; color: var(--text-secondary);"><code>{{ g.device_id|highlight(query) }}</code></div>
+                    </td>
+                    <td>
+                        {% if g.is_enabled %}
+                        <span class="badge badge-green">📍 GPS ON</span>
+                        {% else %}
+                        <span class="badge badge-red">❌ GPS OFF</span>
+                        {% endif %}
+                    </td>
+                    <td class="time-text">{{ g.synced_at|to_ist if g.synced_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- 6. Keystrokes Results (if Phase 2 data exists) -->
+    {% if search_data.records.keystrokes and (category == 'all' or category == 'keystrokes') %}
+    <div class="card-box">
+        <div class="category-section-title">
+            <h3><span>⌨️</span> Keystrokes & Text Input</h3>
+            <span class="results-count-pill">{{ search_data.counts.keystrokes }} records</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 180px;">Timestamp</th>
+                    <th style="width: 180px;">Node</th>
+                    <th style="width: 180px;">App</th>
+                    <th>Captured Content</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for k in search_data.records.keystrokes %}
+                <tr>
+                    <td class="time-text">{{ k.captured_at|to_ist if k.captured_at else '-' }}</td>
+                    <td><span class="node-pill">🖥️ {{ device_map.get(k.device_id, k.device_id|truncate(10)) }}</span></td>
+                    <td>
+                        <strong>{{ k.app_name|highlight(query) if k.app_name else k.app_package }}</strong>
+                        <div style="font-size: 11px; color: var(--text-secondary);"><code>{{ k.app_package|highlight(query) }}</code></div>
+                    </td>
+                    <td style="word-break: break-word;">{{ k.text|highlight(query) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+{% else %}
+
+    <!-- Initial Search Screen -->
+    <div class="card-box">
+        <div class="empty-state" style="padding: 60px 20px;">
+            <div style="font-size: 48px; margin-bottom: 16px;">🔍</div>
+            <h2 style="font-size: 18px; color: var(--text-primary); margin-bottom: 8px;">Universal Telemetry Search</h2>
+            <p style="font-size: 14px; color: var(--text-secondary); max-width: 600px; margin: 0 auto 24px auto;">
+                Perform fast, case-insensitive <code>LIKE %...%</code> queries across all relational tables including incoming/outgoing voice calls, text messages, push notifications, and device telemetry.
+            </p>
+            <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
+                <span class="node-pill">📞 Numbers & Contact Names</span>
+                <span class="node-pill">💬 SMS Text & OTP Codes</span>
+                <span class="node-pill">🔔 WhatsApp / App Alerts</span>
+                <span class="node-pill">📶 SIM Slot / Carriers</span>
+                <span class="node-pill">🖥️ Device Models & IDs</span>
+            </div>
+        </div>
+    </div>
+
+{% endif %}
+
+<script>
+    // Keyboard shortcut '/' to focus search input
+    document.addEventListener('keydown', function(e) {
+        if (e.key === '/' && document.activeElement !== document.getElementById('mainSearchInput')) {
+            e.preventDefault();
+            const input = document.getElementById('mainSearchInput');
+            if (input) {
+                input.focus();
+                input.select();
+            }
+        }
+    });
+</script>
+{% endblock %}

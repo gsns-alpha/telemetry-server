@@ -216,4 +216,42 @@ def test_device_ping(client):
         assert device.is_online is True
 
 
+def test_api_search(client):
+    # Populate test data
+    now = datetime.now(timezone.utc)
+    with app.app_context():
+        db.session.add(Device(device_id="dev_search_1", device_model="Pixel 8 Pro", android_version="14", app_version="1.0.0", last_sync=now))
+        db.session.add(Notification(device_id="dev_search_1", app_package="com.whatsapp", app_name="WhatsApp", title="Alice", content="Meeting at 5pm", received_at=now))
+        db.session.add(CallLog(device_id="dev_search_1", phone_number="+19876543210", contact_name="Bob Smith", call_type="incoming", duration_sec=45, occurred_at=now))
+        db.session.add(SmsMessage(device_id="dev_search_1", address="BANK-ALERT", contact_name="Bank", body="Your OTP is 987654", sms_type="inbox", occurred_at=now))
+        db.session.commit()
+
+    # Unauthorized search
+    r = client.get('/api/v1/search?q=Alice')
+    assert r.status_code == 401
+
+    # Authorized search with X-API-Key (case-insensitive)
+    r = client.get('/api/v1/search?q=alice', headers={'X-API-Key': 'test-api-key'})
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data['total_results'] >= 1
+    assert len(data['results']['notifications']) >= 1
+    assert data['results']['notifications'][0]['title'] == 'Alice'
+
+    # Search for number pattern across calls & sms
+    r = client.get('/api/v1/search?q=9876', headers={'X-API-Key': 'test-api-key'})
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data['counts']['calls'] >= 1
+    assert data['counts']['sms'] >= 1
+
+    # Category filtered search
+    r = client.get('/api/v1/search?q=pixel&type=devices', headers={'X-API-Key': 'test-api-key'})
+    assert r.status_code == 200
+    data = r.get_json()
+    assert len(data['results']['devices']) >= 1
+    assert data['results']['devices'][0]['device_model'] == 'Pixel 8 Pro'
+
+
+
 

