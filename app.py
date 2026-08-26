@@ -132,12 +132,15 @@ class Device(db.Model):
 
     @property
     def is_online(self):
+        # A device is considered offline only after 30 minutes (1800s) without
+        # any ping or sync. Android Doze mode can create gaps of up to ~10 min
+        # between heartbeats even when the service is alive, so 10 min was too tight.
         last_seen = self.last_ping or self.last_sync
         if not last_seen:
             return False
         if last_seen.tzinfo is None:
             last_seen = last_seen.replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - last_seen).total_seconds() < 600
+        return (datetime.now(timezone.utc) - last_seen).total_seconds() < 1800
 
 
 
