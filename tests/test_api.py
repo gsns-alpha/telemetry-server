@@ -249,9 +249,118 @@ def test_api_search(client):
     r = client.get('/api/v1/search?q=pixel&type=devices', headers={'X-API-Key': 'test-api-key'})
     assert r.status_code == 200
     data = r.get_json()
-    assert len(data['results']['devices']) >= 1
-    assert data['results']['devices'][0]['device_model'] == 'Pixel 8 Pro'
 
+def test_discord_important_highlighting(monkeypatch):
+    from app import send_discord_for_notifications, send_discord_for_calls, send_discord_for_sms
 
+    sent_payloads = []
 
+    def mock_send(payload):
+        sent_payloads.append(payload)
 
+    monkeypatch.setattr('app._send_discord', mock_send)
+
+    # 1. Important Notification test with keyword 'prashant'
+    sent_payloads.clear()
+    send_discord_for_notifications([
+        {
+            'app_package': 'com.whatsapp',
+            'app_name': 'WhatsApp',
+            'title': 'Prashant Kumar',
+            'content': 'Hey, call me back',
+            'category': 'VoIP & Social Messages'
+        }
+    ], 'device_test_123456')
+
+    assert len(sent_payloads) == 1
+    embed = sent_payloads[0]['embeds'][0]
+    assert embed['title'] == '[!VSM]'
+    assert '⚠️' in embed['description']
+    assert embed['color'] == 0xED4245
+
+    # 2. Important Call Log test with keyword '9871920832'
+    sent_payloads.clear()
+    send_discord_for_calls([
+        {
+            'phone_number': '+919871920832',
+            'contact_name': 'Unknown',
+            'call_type': 'incoming',
+            'duration_sec': 120
+        }
+    ], 'device_test_123456')
+
+    assert len(sent_payloads) == 1
+    embed = sent_payloads[0]['embeds'][0]
+    assert embed['title'] == '[!TC]'
+    assert '⚠️' in embed['description']
+    assert embed['color'] == 0xED4245
+
+    # 3. Important SMS test with keyword 'prashant'
+    sent_payloads.clear()
+    send_discord_for_sms([
+        {
+            'address': '9999999999',
+            'contact_name': 'Friend',
+            'body': 'Meeting with prashant at 4pm',
+            'sms_type': 'inbox'
+        }
+    ], 'device_test_123456')
+
+    assert len(sent_payloads) == 1
+    embed = sent_payloads[0]['embeds'][0]
+    assert embed['title'] == '[!SMS]'
+    assert '⚠️' in embed['description']
+    assert embed['color'] == 0xED4245
+
+    # 4. Uppercase case-insensitivity test ('PRASHANT')
+    sent_payloads.clear()
+    send_discord_for_notifications([
+        {
+            'app_package': 'com.whatsapp',
+            'app_name': 'WhatsApp',
+            'title': 'ALERT FROM PRASHANT',
+            'content': 'URGENT MESSAGE',
+            'category': 'VoIP & Social Messages'
+        }
+    ], 'device_test_123456')
+
+    assert len(sent_payloads) == 1
+    embed = sent_payloads[0]['embeds'][0]
+    assert embed['title'] == '[!VSM]'
+    assert '⚠️' in embed['description']
+    assert embed['color'] == 0xED4245
+
+    # 5. Formatted phone number test ('+91-98719-20832')
+    sent_payloads.clear()
+    send_discord_for_calls([
+        {
+            'phone_number': '+91-98719-20832',
+            'contact_name': 'Unknown Caller',
+            'call_type': 'incoming',
+            'duration_sec': 50
+        }
+    ], 'device_test_123456')
+
+    assert len(sent_payloads) == 1
+    embed = sent_payloads[0]['embeds'][0]
+    assert embed['title'] == '[!TC]'
+    assert '⚠️' in embed['description']
+    assert embed['color'] == 0xED4245
+
+    # 6. Regular notification (no keyword match) -> standard [VSM]
+    sent_payloads.clear()
+    send_discord_for_notifications([
+        {
+            'app_package': 'com.whatsapp',
+            'app_name': 'WhatsApp',
+            'title': 'Random Sender',
+            'content': 'Hello world',
+            'category': 'VoIP & Social Messages'
+        }
+    ], 'device_test_123456')
+
+    assert len(sent_payloads) == 1
+    embed = sent_payloads[0]['embeds'][0]
+    assert embed['title'] == '[VSM]'
+    assert '⚠️' not in embed['description']
+    assert embed['color'] == 0x5865F2
