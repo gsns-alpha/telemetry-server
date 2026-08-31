@@ -496,51 +496,53 @@ def send_discord_for_gps(gps_events, device_id):
 # offline for >15 minutes (no ping or sync). Sends a Discord alert when a
 # device goes offline, and again when it comes back online.
 
-_offline_alerted = set()  # device_ids currently in "alerted as offline" state
+_offline_alerted = {}  # {device_id: last_alert_date_str}
 
 def _monitor_offline_devices():
-    """Background loop: check all devices every 10 minutes, alert on offline."""
+    """Background loop: check all devices every 3 minutes, alert on offline at most once a day."""
     import time as _time
+    # Wait 15s for DB and gunicorn workers to be fully ready
+    _time.sleep(15)
+    print('[OFFLINE-MONITOR] Background thread started, checking every 3 minutes (daily alert rate-limit)', flush=True)
     while True:
-        _time.sleep(600)  # 10 minutes
         try:
             with app.app_context():
                 devices = Device.query.all()
+                online_count = sum(1 for d in devices if d.is_online)
+                offline_count = len(devices) - online_count
+                today_str = datetime.now(IST).strftime('%Y-%m-%d')
                 for device in devices:
+                    dev_suffix = (device.device_id or '')[-6:]
+                    gps_st = 'ON' if device.gps_enabled else 'OFF'
+                    bat_lvl = f"{device.battery_level}%" if device.battery_level is not None else "?"
                     if not device.is_online:
-                        if device.device_id not in _offline_alerted:
-                            _offline_alerted.add(device.device_id)
-                            last_seen = device.last_ping or device.last_sync
-                            last_str = last_seen.strftime('%Y-%m-%d %H:%M IST') if last_seen else 'never'
-                            embed = {
-                                'title': '🔴 DEVICE OFFLINE',
-                                'description': (
-                                    f'**{device.hardware_model or device.device_id}**\n'
-                                    f'Device ID: `...{device.device_id[-8:]}`\n'
-                                    f'Last seen: {last_str}\n'
-                                    f'Battery: {device.battery_level}%'
-                                ),
-                                'color': 0xED4245  # red
-                            }
-                            _send_discord({'embeds': [embed]})
-                            app.logger.info(f'Offline alert sent for {device.device_id}')
+                        last_alert_date = _offline_alerted.get(device.device_id)
+                        if last_alert_date != today_str:
+                            _offline_alerted[device.device_id] = today_str
+                            dedup_key = f"dof:{device.device_id}:{today_str}"
+                            if not _discord_is_duplicate(dedup_key):
+                                embed = {
+                                    'title': '[DOF]',
+                                    'description': f'{dev_suffix} · OFF · B:{bat_lvl} · G:{gps_st}',
+                                    'color': 0xED4245
+                                }
+                                _send_discord({'embeds': [embed]})
+                                print(f'[OFFLINE-MONITOR] [DOF] daily alert sent for {device.device_id}', flush=True)
                     else:
-                        # Device is online — send "back online" alert if we previously alerted
                         if device.device_id in _offline_alerted:
-                            _offline_alerted.discard(device.device_id)
-                            embed = {
-                                'title': '🟢 DEVICE BACK ONLINE',
-                                'description': (
-                                    f'**{device.hardware_model or device.device_id}**\n'
-                                    f'Device ID: `...{device.device_id[-8:]}`\n'
-                                    f'Battery: {device.battery_level}%'
-                                ),
-                                'color': 0x57F287  # green
-                            }
-                            _send_discord({'embeds': [embed]})
-                            app.logger.info(f'Back-online alert sent for {device.device_id}')
+                            del _offline_alerted[device.device_id]
+                            dedup_key = f"don:{device.device_id}:{int(_time.time()) // 300}"
+                            if not _discord_is_duplicate(dedup_key):
+                                embed = {
+                                    'title': '[DON]',
+                                    'description': f'{dev_suffix} · ON · B:{bat_lvl} · G:{gps_st}',
+                                    'color': 0x57F287
+                                }
+                                _send_discord({'embeds': [embed]})
+                                print(f'[OFFLINE-MONITOR] [DON] alert sent for {device.device_id}', flush=True)
         except Exception as e:
-            app.logger.debug(f'Offline monitor error: {e}')
+            print(f'[OFFLINE-MONITOR] ERROR: {e}', flush=True)
+        _time.sleep(180)  # 3 minutes
 
 # Start the offline monitor daemon thread
 _offline_monitor_thread = threading.Thread(target=_monitor_offline_devices, daemon=True)
