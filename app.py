@@ -158,6 +158,7 @@ class Device(db.Model):
     gps_enabled = db.Column(db.Boolean)
     gps_state_changed_at = db.Column(db.DateTime)
     recent_logs = db.Column(db.Text)
+    last_offline_alert_at = db.Column(db.DateTime)
 
 
     @property
@@ -588,57 +589,84 @@ def send_discord_for_gps(gps_events, device_id):
 
 
 # ── Device Offline Monitor ─────────────────────────────────────────────────
-# Background thread that checks every 10 minutes for devices that have been
-# offline for >15 minutes (no ping or sync). Sends a Discord alert when a
-# device goes offline, and again when it comes back online.
-
-_offline_alerted = {}  # {device_id: last_alert_date_str}
+# Background thread that checks every 5 minutes for devices that have been
+# offline for >30 minutes (no ping or sync). Sends a Discord alert at most
+# once every 24 hours per device using a DB-persisted timestamp and cluster lock.
 
 def _monitor_offline_devices():
-    """Background loop: check all devices every 3 minutes, alert on offline at most once a day."""
+    """Background loop: checks devices every 5 minutes with cluster-wide leader locking and DB-backed once-a-day rate limiting."""
     import time as _time
-    # Wait 15s for DB and gunicorn workers to be fully ready
-    _time.sleep(15)
-    print('[OFFLINE-MONITOR] Background thread started, checking every 3 minutes (daily alert rate-limit)', flush=True)
+    _time.sleep(30)
+    print('[OFFLINE-MONITOR] Background thread started', flush=True)
     while True:
         try:
             with app.app_context():
-                devices = Device.query.all()
-                online_count = sum(1 for d in devices if d.is_online)
-                offline_count = len(devices) - online_count
-                today_str = datetime.now(IST).strftime('%Y-%m-%d')
-                for device in devices:
-                    dev_suffix = (device.device_id or '')[-6:]
-                    gps_st = 'ON' if device.gps_enabled else 'OFF'
-                    bat_lvl = f"{device.battery_level}%" if device.battery_level is not None else "?"
-                    if not device.is_online:
-                        last_alert_date = _offline_alerted.get(device.device_id)
-                        if last_alert_date != today_str:
-                            _offline_alerted[device.device_id] = today_str
-                            dedup_key = f"dof:{device.device_id}:{today_str}"
-                            if not _discord_is_duplicate(dedup_key):
-                                embed = {
-                                    'title': '[DOF]',
-                                    'description': f'{dev_suffix} · OFF · B:{bat_lvl} · G:{gps_st}',
-                                    'color': 0xED4245
-                                }
-                                _send_discord({'embeds': [embed]})
-                                print(f'[OFFLINE-MONITOR] [DOF] daily alert sent for {device.device_id}', flush=True)
-                    else:
-                        if device.device_id in _offline_alerted:
-                            del _offline_alerted[device.device_id]
-                            dedup_key = f"don:{device.device_id}:{int(_time.time()) // 300}"
-                            if not _discord_is_duplicate(dedup_key):
-                                embed = {
-                                    'title': '[DON]',
-                                    'description': f'{dev_suffix} · ON · B:{bat_lvl} · G:{gps_st}',
-                                    'color': 0x57F287
-                                }
-                                _send_discord({'embeds': [embed]})
-                                print(f'[OFFLINE-MONITOR] [DON] alert sent for {device.device_id}', flush=True)
+                is_leader = True
+                try:
+                    if 'postgresql' in str(db.engine.url):
+                        lock_res = db.session.execute(db.text("SELECT pg_try_advisory_lock(987654321)")).scalar()
+                        is_leader = bool(lock_res)
+                except Exception:
+                    is_leader = True
+
+                if is_leader:
+                    try:
+                        now = datetime.now(timezone.utc)
+                        devices = Device.query.all()
+                        for device in devices:
+                            # Skip mock / dummy / test devices
+                            if not device.device_id or device.device_id.startswith('test') or device.device_id == 'device':
+                                continue
+                            # Device must have synced or pinged at least once
+                            if not device.last_ping and not device.last_sync:
+                                continue
+
+                            dev_suffix = device.device_id[-6:]
+                            gps_st = 'ON' if device.gps_enabled else 'OFF'
+                            bat_lvl = f"{device.battery_level}%" if device.battery_level is not None else "?"
+
+                            if not device.is_online:
+                                should_alert = False
+                                if not device.last_offline_alert_at:
+                                    should_alert = True
+                                else:
+                                    last_alert = device.last_offline_alert_at
+                                    if last_alert.tzinfo is None:
+                                        last_alert = last_alert.replace(tzinfo=timezone.utc)
+                                    if (now - last_alert).total_seconds() >= 86400:
+                                        should_alert = True
+
+                                if should_alert:
+                                    device.last_offline_alert_at = now
+                                    db.session.commit()
+                                    embed = {
+                                        'title': '[DOF]',
+                                        'description': f'{dev_suffix} · OFF · B:{bat_lvl} · G:{gps_st}',
+                                        'color': 0xED4245
+                                    }
+                                    _send_discord({'embeds': [embed]})
+                                    print(f'[OFFLINE-MONITOR] [DOF] daily alert sent for {device.device_id}', flush=True)
+                            else:
+                                if device.last_offline_alert_at is not None:
+                                    device.last_offline_alert_at = None
+                                    db.session.commit()
+                                    embed = {
+                                        'title': '[DON]',
+                                        'description': f'{dev_suffix} · ON · B:{bat_lvl} · G:{gps_st}',
+                                        'color': 0x57F287
+                                    }
+                                    _send_discord({'embeds': [embed]})
+                                    print(f'[OFFLINE-MONITOR] [DON] alert sent for {device.device_id}', flush=True)
+                    finally:
+                        try:
+                            if 'postgresql' in str(db.engine.url):
+                                db.session.execute(db.text("SELECT pg_advisory_unlock(987654321)"))
+                                db.session.commit()
+                        except Exception:
+                            pass
         except Exception as e:
             print(f'[OFFLINE-MONITOR] ERROR: {e}', flush=True)
-        _time.sleep(180)  # 3 minutes
+        _time.sleep(300)  # Check every 5 minutes
 
 # Start the offline monitor daemon thread
 _offline_monitor_thread = threading.Thread(target=_monitor_offline_devices, daemon=True)
@@ -2076,6 +2104,7 @@ with app.app_context():
     try:
         from sqlalchemy import text
         with db.engine.connect() as conn:
+            conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_offline_alert_at TIMESTAMP;"))
             conn.execute(text("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
             conn.execute(text("ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
             conn.execute(text("ALTER TABLE cdr_statements ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);"))
