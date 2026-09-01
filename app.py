@@ -159,6 +159,7 @@ class Device(db.Model):
     gps_state_changed_at = db.Column(db.DateTime)
     recent_logs = db.Column(db.Text)
     last_offline_alert_at = db.Column(db.DateTime)
+    fcm_token = db.Column(db.String(256))
 
 
     @property
@@ -673,6 +674,144 @@ _offline_monitor_thread = threading.Thread(target=_monitor_offline_devices, daem
 _offline_monitor_thread.start()
 
 
+# ── FCM Wake Sender (V1 API) ───────────────────────────────────────────────
+# Background thread that sends a silent FCM push to all registered devices
+# every 4 hours via the FCM V1 API (requires service account JSON key).
+# This is the ONLY reliable mechanism to wake an app after Android / Nothing OS
+# issues a force-stop during Doze mode.
+#
+# Service account JSON path: /app/firebase-adminsdk.json
+# (mounted from a Kubernetes secret or ConfigMap)
+
+FCM_PROJECT_ID = os.getenv('FCM_PROJECT_ID', 'cf-telemetry')
+FCM_SERVICE_ACCOUNT_PATH = os.getenv('FCM_SERVICE_ACCOUNT_PATH', '/app/firebase-adminsdk.json')
+FCM_WAKE_INTERVAL_SECONDS = int(os.getenv('FCM_WAKE_INTERVAL_SEC', str(4 * 3600)))  # default 4 hours
+
+_fcm_access_token_cache = {'token': None, 'expires_at': 0}
+_fcm_token_lock = threading.Lock()
+
+
+def _get_fcm_access_token() -> str | None:
+    """Get a valid OAuth2 access token for FCM V1 API using service account credentials."""
+    import time as _time
+    with _fcm_token_lock:
+        now = _time.time()
+        if _fcm_access_token_cache['token'] and now < _fcm_access_token_cache['expires_at'] - 60:
+            return _fcm_access_token_cache['token']
+
+        if not os.path.exists(FCM_SERVICE_ACCOUNT_PATH):
+            print(f'[FCM-WAKE] Service account file not found: {FCM_SERVICE_ACCOUNT_PATH}', flush=True)
+            return None
+
+        try:
+            import json as _json
+            import jwt as _jwt  # PyJWT
+            with open(FCM_SERVICE_ACCOUNT_PATH) as f:
+                sa = _json.load(f)
+
+            claim_set = {
+                'iss': sa['client_email'],
+                'scope': 'https://www.googleapis.com/auth/firebase.messaging',
+                'aud': 'https://oauth2.googleapis.com/token',
+                'iat': int(now),
+                'exp': int(now) + 3600
+            }
+            signed_jwt = _jwt.encode(claim_set, sa['private_key'], algorithm='RS256')
+
+            import requests as _req
+            resp = _req.post(
+                'https://oauth2.googleapis.com/token',
+                data={
+                    'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                    'assertion': signed_jwt
+                },
+                timeout=10
+            )
+            if resp.status_code == 200:
+                token_data = resp.json()
+                _fcm_access_token_cache['token'] = token_data['access_token']
+                _fcm_access_token_cache['expires_at'] = now + token_data.get('expires_in', 3600)
+                return _fcm_access_token_cache['token']
+            else:
+                print(f'[FCM-WAKE] OAuth2 token error: {resp.status_code} {resp.text[:200]}', flush=True)
+                return None
+        except Exception as e:
+            print(f'[FCM-WAKE] Token generation error: {e}', flush=True)
+            return None
+
+
+def _send_fcm_wake(fcm_token: str, device_id: str) -> bool:
+    """Send a single silent FCM V1 data message to wake a device. Returns True on success."""
+    try:
+        access_token = _get_fcm_access_token()
+        if not access_token:
+            return False
+
+        import requests as _req
+        url = f'https://fcm.googleapis.com/v1/projects/{FCM_PROJECT_ID}/messages:send'
+        resp = _req.post(
+            url,
+            headers={
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'message': {
+                    'token': fcm_token,
+                    'data': {
+                        'type': 'wake',
+                        'device_id': device_id
+                    },
+                    'android': {
+                        'priority': 'HIGH',
+                        'ttl': '14400s'
+                    }
+                }
+            },
+            timeout=10
+        )
+        if resp.status_code == 200:
+            print(f'[FCM-WAKE] ✅ Sent to {device_id[-6:]}', flush=True)
+            return True
+        else:
+            print(f'[FCM-WAKE] HTTP {resp.status_code} for {device_id[-6:]}: {resp.text[:200]}', flush=True)
+            return False
+    except Exception as e:
+        print(f'[FCM-WAKE] Error for {device_id[-6:]}: {e}', flush=True)
+        return False
+
+
+def _fcm_wake_loop():
+    """Background loop: send silent FCM wake push to all registered devices every 4 hours."""
+    import time as _time
+    _time.sleep(60)  # Wait 1 minute after startup before first run
+    print(f'[FCM-WAKE] Background sender started (interval={FCM_WAKE_INTERVAL_SECONDS}s)', flush=True)
+    while True:
+        if not os.path.exists(FCM_SERVICE_ACCOUNT_PATH):
+            print(f'[FCM-WAKE] Service account not found at {FCM_SERVICE_ACCOUNT_PATH}, skipping', flush=True)
+        else:
+            try:
+                with app.app_context():
+                    # Only send to devices that have an FCM token and were seen recently (last 7 days)
+                    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+                    devices = Device.query.filter(
+                        Device.fcm_token.isnot(None),
+                        Device.fcm_token != ''
+                    ).all()
+                    active = [d for d in devices if (d.last_ping or d.last_sync or d.first_seen) and
+                              (d.last_ping or d.last_sync or d.first_seen) >= cutoff]
+                    print(f'[FCM-WAKE] Sending wake to {len(active)} device(s)', flush=True)
+                    for device in active:
+                        _send_fcm_wake(device.fcm_token, device.device_id)
+            except Exception as e:
+                print(f'[FCM-WAKE] Loop error: {e}', flush=True)
+        _time.sleep(FCM_WAKE_INTERVAL_SECONDS)
+
+
+_fcm_wake_thread = threading.Thread(target=_fcm_wake_loop, daemon=True)
+_fcm_wake_thread.start()
+
+
 @app.route('/api/v1/ping', methods=['POST'])
 @require_api_key
 def device_ping():
@@ -742,9 +881,11 @@ def device_ping():
         import json
         device.recent_logs = json.dumps(data['recent_logs'])
 
+    # Store the FCM token for server-initiated wake pushes
+    if data.get('fcm_token'):
+        device.fcm_token = data['fcm_token']
 
     db.session.commit()
-
 
     return jsonify({
         'status': 'ok',
@@ -2105,6 +2246,7 @@ with app.app_context():
         from sqlalchemy import text
         with db.engine.connect() as conn:
             conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_offline_alert_at TIMESTAMP;"))
+            conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS fcm_token VARCHAR(256);"))
             conn.execute(text("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
             conn.execute(text("ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
             conn.execute(text("ALTER TABLE cdr_statements ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);"))
