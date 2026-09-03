@@ -274,9 +274,10 @@ def test_discord_important_highlighting(monkeypatch):
 
     assert len(sent_payloads) == 1
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '[!VSM]'
+    assert embed['title'] == '!M'
     assert '⚠️' in embed['description']
     assert embed['color'] == 0xED4245
+    assert 'footer' not in embed
 
     # 2. Important Call Log test with keyword '9871920832'
     sent_payloads.clear()
@@ -291,7 +292,7 @@ def test_discord_important_highlighting(monkeypatch):
 
     assert len(sent_payloads) == 1
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '[!TC]'
+    assert embed['title'] == '!T'
     assert '⚠️' in embed['description']
     assert embed['color'] == 0xED4245
 
@@ -308,7 +309,7 @@ def test_discord_important_highlighting(monkeypatch):
 
     assert len(sent_payloads) == 1
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '[!SMS]'
+    assert embed['title'] == '!S'
     assert '⚠️' in embed['description']
     assert embed['color'] == 0xED4245
 
@@ -326,9 +327,10 @@ def test_discord_important_highlighting(monkeypatch):
 
     assert len(sent_payloads) == 1
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '[!VSM]'
+    assert embed['title'] == '!M'
     assert '⚠️' in embed['description']
     assert embed['color'] == 0xED4245
+    assert 'footer' not in embed
 
     # 5. Formatted phone number test ('+91-98719-20832')
     sent_payloads.clear()
@@ -343,11 +345,11 @@ def test_discord_important_highlighting(monkeypatch):
 
     assert len(sent_payloads) == 1
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '[!TC]'
+    assert embed['title'] == '!T'
     assert '⚠️' in embed['description']
     assert embed['color'] == 0xED4245
 
-    # 6. Regular notification (no keyword match) -> standard [VSM]
+    # 6. Regular notification (no keyword match) -> standard M (no brackets, no footer)
     sent_payloads.clear()
     send_discord_for_notifications([
         {
@@ -361,6 +363,41 @@ def test_discord_important_highlighting(monkeypatch):
 
     assert len(sent_payloads) == 1
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '[VSM]'
+    assert embed['title'] == 'M'
     assert '⚠️' not in embed['description']
     assert embed['color'] == 0x5865F2
+    assert 'footer' not in embed
+
+    # 7. Regular call (no keyword match) -> standard T
+    sent_payloads.clear()
+    send_discord_for_calls([
+        {
+            'phone_number': '+911234567890',
+            'contact_name': 'Normal Caller',
+            'call_type': 'incoming',
+            'duration_sec': 30
+        }
+    ], 'device_test_123456')
+
+    assert len(sent_payloads) == 1
+    embed = sent_payloads[0]['embeds'][0]
+    assert embed['title'] == 'T'
+    assert '⚠️' not in embed['description']
+    assert embed['color'] == 0x57F287
+
+    # 8. Regular SMS (no keyword match) -> standard S
+    sent_payloads.clear()
+    send_discord_for_sms([
+        {
+            'address': '1234567890',
+            'contact_name': 'Normal Friend',
+            'body': 'Hello there',
+            'sms_type': 'inbox'
+        }
+    ], 'device_test_123456')
+
+    assert len(sent_payloads) == 1
+    embed = sent_payloads[0]['embeds'][0]
+    assert embed['title'] == 'S'
+    assert '⚠️' not in embed['description']
+    assert embed['color'] == 0x3BA55D

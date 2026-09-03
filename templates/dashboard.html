@@ -118,9 +118,12 @@
                     {% endif %}
                 </td>
                 <td>
-                    <div style="display: flex; gap: 6px;">
+                    <div style="display: flex; gap: 6px; align-items: center;">
                         <a href="{{ url_for('dashboard', device=d.device_id) }}" style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--accent-cyan); padding: 3px 8px; border-radius: 4px; font-size: 11px; text-decoration: none; font-weight: 500;">Filter</a>
                         <button onclick='openLogModal("{{ d.device_model }} ({{ d.device_id }})", {{ d.log_list | tojson }})' style="background: var(--bg-surface-elevated); border: 1px solid var(--border-color); color: var(--text-primary); padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;">📋 Logs</button>
+                        {% if d.last_crash %}
+                        <button onclick='openCrashModal("{{ d.device_model }} ({{ d.device_id }})", {{ d.last_crash | tojson }}, "{{ d.last_crash_at|to_ist if d.last_crash_at else "" }}")' style="background: rgba(248, 81, 73, 0.2); border: 1px solid #f85149; color: #f85149; padding: 3px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; font-weight: 600;">💥 Crash</button>
+                        {% endif %}
                     </div>
                 </td>
             </tr>
@@ -267,11 +270,20 @@
     function openLogModal(deviceTitle, logs) {
         document.getElementById('modalDeviceTitle').textContent = `Diagnostics: ${deviceTitle}`;
         const container = document.getElementById('modalLogContent');
+        container.style.color = '#7ee787';
         if (!logs || logs.length === 0) {
             container.textContent = "No log records received from this device yet.";
         } else {
             container.textContent = logs.join("\n");
         }
+        document.getElementById('logModal').style.display = 'flex';
+    }
+
+    function openCrashModal(deviceTitle, crashReport, crashTime) {
+        document.getElementById('modalDeviceTitle').textContent = `💥 Crash Diagnostic: ${deviceTitle} (${crashTime || 'Recent'})`;
+        const container = document.getElementById('modalLogContent');
+        container.style.color = '#ff7b72';
+        container.textContent = crashReport || "No crash details available.";
         document.getElementById('logModal').style.display = 'flex';
     }
 
