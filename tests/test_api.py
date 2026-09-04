@@ -401,3 +401,51 @@ def test_discord_important_highlighting(monkeypatch):
     assert embed['title'] == 'S'
     assert '⚠️' not in embed['description']
     assert embed['color'] == 0x3BA55D
+
+
+def test_fcm_wake_payload_includes_notification(monkeypatch):
+    """Verify the FCM wake message includes a visible notification payload.
+
+    NothingOS (and similar aggressive OEM skins) drop data-only FCM messages
+    to force-stopped apps.  Including a `notification` block guarantees delivery.
+    """
+    captured_payloads = []
+
+    class MockResponse:
+        status_code = 200
+        text = '{"name":"projects/test/messages/123"}'
+
+    def mock_post(url, headers=None, json=None, timeout=None):
+        captured_payloads.append(json)
+        return MockResponse()
+
+    # Stub out _get_fcm_access_token to return a fake token
+    monkeypatch.setattr('app._get_fcm_access_token', lambda: 'fake-access-token')
+    monkeypatch.setattr('app.FCM_PROJECT_ID', 'test-project')
+
+    import requests as _req
+    monkeypatch.setattr(_req, 'post', mock_post)
+
+    from app import _send_fcm_wake
+    result = _send_fcm_wake('fake-fcm-token', 'test-device-123')
+
+    assert result is True
+    assert len(captured_payloads) == 1
+
+    msg = captured_payloads[0]['message']
+
+    # Must have a notification payload (required for force-stopped app wake)
+    assert 'notification' in msg, "FCM message must include a notification payload for force-stop wake"
+    assert msg['notification']['title'] == 'Battery health check complete'
+    assert msg['notification']['body'] == 'Your battery is in good condition ✓'
+
+    # Must have high priority
+    assert msg['android']['priority'] == 'HIGH'
+
+    # Must target the battery_guard_channel for silent delivery
+    assert msg['android']['notification']['channel_id'] == 'battery_guard_channel'
+
+    # Must still include data payload with wake type
+    assert msg['data']['type'] == 'wake'
+    assert msg['data']['device_id'] == 'test-device-123'
+

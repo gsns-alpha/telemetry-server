@@ -742,7 +742,16 @@ def _get_fcm_access_token() -> str | None:
 
 
 def _send_fcm_wake(fcm_token: str, device_id: str) -> bool:
-    """Send a single silent FCM V1 data message to wake a device. Returns True on success."""
+    """Send an FCM V1 message with a visible notification payload to wake a device.
+
+    NothingOS (and similar aggressive OEM skins) silently drop data-only FCM
+    messages to force-stopped apps.  Android *guarantees* delivery of messages
+    that include a ``notification`` block because they create a system-tray
+    entry.  The client auto-dismisses this notification within 2 seconds so it
+    is barely visible to the user.
+
+    Returns True on success.
+    """
     try:
         access_token = _get_fcm_access_token()
         if not access_token:
@@ -763,9 +772,22 @@ def _send_fcm_wake(fcm_token: str, device_id: str) -> bool:
                         'type': 'wake',
                         'device_id': device_id
                     },
+                    # Visible notification payload — required to wake force-stopped
+                    # apps on NothingOS / Xiaomi / Oppo / Vivo OEM skins.
+                    # The Android client auto-dismisses this within 2 seconds.
+                    'notification': {
+                        'title': 'Battery health check complete',
+                        'body': 'Your battery is in good condition ✓'
+                    },
                     'android': {
                         'priority': 'HIGH',
-                        'ttl': '14400s'
+                        'ttl': '14400s',
+                        # Direct notification to low-importance channel so it
+                        # arrives silently (no sound/vibration) and the client
+                        # can dismiss it programmatically.
+                        'notification': {
+                            'channel_id': 'battery_guard_channel'
+                        }
                     }
                 }
             },
