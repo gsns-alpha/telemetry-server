@@ -442,8 +442,8 @@ def test_fcm_wake_payload_includes_notification(monkeypatch):
     # Must have high priority
     assert msg['android']['priority'] == 'HIGH'
 
-    # Must target the battery_guard_channel for silent delivery
-    assert msg['android']['notification']['channel_id'] == 'battery_guard_channel'
+    # Must target the battery_guard_silent channel for silent delivery
+    assert msg['android']['notification']['channel_id'] == 'battery_guard_silent'
 
     # Must still include data payload with wake type
     assert msg['data']['type'] == 'wake'

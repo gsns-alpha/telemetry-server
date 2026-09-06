@@ -786,7 +786,7 @@ def _send_fcm_wake(fcm_token: str, device_id: str) -> bool:
                         # arrives silently (no sound/vibration) and the client
                         # can dismiss it programmatically.
                         'notification': {
-                            'channel_id': 'battery_guard_channel'
+                            'channel_id': 'battery_guard_silent'
                         }
                     }
                 }
