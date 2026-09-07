@@ -121,6 +121,48 @@ def test_sync_successful_batch(client):
         assert sms[0].body == "Your verification code is 492019"
 
 
+def test_sync_skips_backup_in_progress_notification(client):
+    """Verify that notifications with title 'Backup in progress' are skipped from saving to DB."""
+    headers = {'X-API-Key': 'test-api-key'}
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    payload = {
+        "device_id": "test_np2a_backup_skip",
+        "device_model": "Nothing Phone 2a",
+        "notifications": [
+            {
+                "local_id": 991,
+                "app_package": "com.whatsapp.w4b",
+                "app_name": "WhatsApp Business",
+                "title": "Backup in progress",
+                "content": "Uploading: 1.0 MB of 1.2 MB (84%)",
+                "received_at": now_ms
+            },
+            {
+                "local_id": 992,
+                "app_package": "com.whatsapp.w4b",
+                "app_name": "WhatsApp Business",
+                "title": "Alice",
+                "content": "Real message",
+                "received_at": now_ms
+            }
+        ]
+    }
+
+    response = client.post('/api/v1/sync', headers=headers, json=payload)
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['status'] == 'ok'
+    # Both local_ids should be acknowledged so client clears backlog
+    assert 991 in data['received']['notifications']
+    assert 992 in data['received']['notifications']
+
+    with app.app_context():
+        notifs = Notification.query.filter_by(device_id="test_np2a_backup_skip").all()
+        assert len(notifs) == 1
+        assert notifs[0].title == "Alice"
+
+
 def test_sync_encoded_payload(client):
     import base64
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)

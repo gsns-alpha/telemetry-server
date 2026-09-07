@@ -999,6 +999,12 @@ def sync_data():
             title = decode_field(n.get('title'))
             content = decode_field(n.get('content'))
 
+            # Skip backup progress notifications
+            if title and title.strip().lower() == 'backup in progress':
+                if local_id is not None:
+                    received_notification_ids.append(local_id)
+                continue
+
             # Deduplication: check if identical notification exists within 10 seconds window
             dup = Notification.query.filter(
                 Notification.device_id == device_id,
