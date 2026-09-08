@@ -293,6 +293,7 @@ def test_api_search(client):
     data = r.get_json()
 
 def test_discord_important_highlighting(monkeypatch):
+    import base64
     from app import send_discord_for_notifications, send_discord_for_calls, send_discord_for_sms
 
     sent_payloads = []
@@ -315,16 +316,18 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
-    assert '@here' in sent_payloads[0].get('content', '')
-    assert 'prashant' in sent_payloads[0].get('content', '')
+    assert 'content' not in sent_payloads[0]  # Nothing revealed in message content
     embed = sent_payloads[0]['embeds'][0]
-    assert '🚨 ALERT: Notification Matched' in embed['title']
-    assert 'prashant' in embed['title']
-    assert embed['color'] == 0xED4245
-    fields = {f['name']: f['value'] for f in embed.get('fields', [])}
-    assert 'Matched Keyword' in fields
-    assert '`prashant`' == fields['Matched Keyword']
-    assert 'WhatsApp' in fields['App']
+    assert embed['title'] == '!M'  # Alert indicator
+    assert embed['color'] == 0xED4245  # Alert red color
+    assert '⚠️' in embed['description']
+    assert 'fields' not in embed  # No plaintext metadata fields
+    assert 'prashant' not in embed['description'].lower()  # Keyword not revealed in plaintext
+    # Ensure the encoded payload can be decoded
+    encoded_part = embed['description'].split(' · ⚠️ · ')[1]
+    decoded_text = base64.b64decode(encoded_part).decode()
+    assert 'Prashant Kumar' in decoded_text
+    assert 'Hey, call me back' in decoded_text
 
     # 2. Important Call Log test with keyword '9871920832'
     sent_payloads.clear()
@@ -338,15 +341,16 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
-    assert '@here' in sent_payloads[0].get('content', '')
-    assert '9871920832' in sent_payloads[0].get('content', '')
+    assert 'content' not in sent_payloads[0]
     embed = sent_payloads[0]['embeds'][0]
-    assert '🚨 ALERT: Call Matched' in embed['title']
-    assert '9871920832' in embed['title']
+    assert embed['title'] == '!T'
     assert embed['color'] == 0xED4245
-    fields = {f['name']: f['value'] for f in embed.get('fields', [])}
-    assert '`9871920832`' == fields['Matched Keyword']
-    assert '+919871920832' in fields['Number']
+    assert '⚠️' in embed['description']
+    assert 'fields' not in embed
+    assert '9871920832' not in embed['description']  # Phone number not in plaintext
+    encoded_part = embed['description'].split(' · ⚠️ · ')[1]
+    decoded_text = base64.b64decode(encoded_part).decode()
+    assert '+919871920832' in decoded_text
 
     # 3. Important SMS test with keyword 'prashant'
     sent_payloads.clear()
@@ -360,15 +364,16 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
-    assert '@here' in sent_payloads[0].get('content', '')
-    assert 'prashant' in sent_payloads[0].get('content', '')
+    assert 'content' not in sent_payloads[0]
     embed = sent_payloads[0]['embeds'][0]
-    assert '🚨 ALERT: SMS Matched' in embed['title']
-    assert 'prashant' in embed['title']
+    assert embed['title'] == '!S'
     assert embed['color'] == 0xED4245
-    fields = {f['name']: f['value'] for f in embed.get('fields', [])}
-    assert '`prashant`' == fields['Matched Keyword']
-    assert '9999999999' in fields['Number']
+    assert '⚠️' in embed['description']
+    assert 'fields' not in embed
+    assert 'prashant' not in embed['description'].lower()
+    encoded_part = embed['description'].split(' · ⚠️ · ')[1]
+    decoded_text = base64.b64decode(encoded_part).decode()
+    assert 'Meeting with prashant' in decoded_text
 
     # 4. Uppercase case-insensitivity test ('PRASHANT')
     sent_payloads.clear()
@@ -383,11 +388,10 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
-    assert '@here' in sent_payloads[0].get('content', '')
     embed = sent_payloads[0]['embeds'][0]
-    assert '🚨 ALERT: Notification Matched' in embed['title']
-    assert 'prashant' in embed['title']
+    assert embed['title'] == '!M'
     assert embed['color'] == 0xED4245
+    assert '⚠️' in embed['description']
 
     # 5. Formatted phone number test ('+91-98719-20832')
     sent_payloads.clear()
@@ -401,11 +405,10 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
-    assert '@here' in sent_payloads[0].get('content', '')
     embed = sent_payloads[0]['embeds'][0]
-    assert '🚨 ALERT: Call Matched' in embed['title']
-    assert '9871920832' in embed['title']
+    assert embed['title'] == '!T'
     assert embed['color'] == 0xED4245
+    assert '⚠️' in embed['description']
 
     # 6. Regular notification (no keyword match) -> standard M (no brackets, no footer)
     sent_payloads.clear()

