@@ -499,11 +499,19 @@ def test_fcm_wake_payload_includes_notification(monkeypatch):
 def test_get_matched_alert_keyword():
     from app import get_matched_alert_keyword, is_important_content
 
-    # Name matching (case-insensitive)
+    # Name matching (case-insensitive & variations)
     assert get_matched_alert_keyword("Hello Prashant") == "prashant"
     assert get_matched_alert_keyword("prashant kumar") == "prashant"
     assert get_matched_alert_keyword("URGENT: PRASHANT CALLED") == "prashant"
+    assert get_matched_alert_keyword("abprashanth") == "prashant"
+    assert get_matched_alert_keyword("prashanth") == "prashant"
+    assert get_matched_alert_keyword("abprashant") == "prashant"
     assert is_important_content("PRASHANT") is True
+    assert is_important_content("abprashanth") is True
+    assert is_important_content("Abprashanth") is True
+    assert is_important_content("ABPRASHANTH") is True
+    assert is_important_content("prashanth") is True
+    assert is_important_content("abprashant") is True
 
     # Phone number matching (various formats)
     assert get_matched_alert_keyword("+919871920832") == "9871920832"
@@ -512,6 +520,8 @@ def test_get_matched_alert_keyword():
     assert get_matched_alert_keyword("+91-98719-20832") == "9871920832"
     assert get_matched_alert_keyword("Call from (987) 192-0832") == "9871920832"
     assert is_important_content("+919871920832") is True
+    assert is_important_content("+91 98719 20832") is True
+    assert is_important_content("98719-20832") is True
 
     # Non-matching cases
     assert get_matched_alert_keyword("Random text message") is None
