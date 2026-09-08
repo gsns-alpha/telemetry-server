@@ -47,8 +47,11 @@
         </thead>
         <tbody>
             {% for c in calls %}
-            <tr>
-                <td class="time-text">{{ c.occurred_at|to_ist if c.occurred_at else '-' }}</td>
+            <tr {% if c|is_alert %}class="row-warning"{% endif %}>
+                <td class="time-text">
+                    {{ c.occurred_at|to_ist if c.occurred_at else '-' }}
+                    {% if c|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                </td>
                 <td>
                     {% if c.call_type == 'ringing' %}
                     <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">🔔 Ringing</span>

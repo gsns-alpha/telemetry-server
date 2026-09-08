@@ -178,3 +178,80 @@ def test_logout(client):
     assert b'Sign In' in r.data
 
 
+def test_alert_keyword_highlighting(client):
+    # Log in
+    client.post('/login', data={'username': 'admin', 'password': 'secretpass'})
+
+    now = datetime.now(timezone.utc)
+    with app.app_context():
+        device = Device(device_id="dev_alert_01", device_model="Alert Phone", android_version="14", app_version="1.0.0", last_sync=now)
+        db.session.add(device)
+
+        # 1. Matching notification (contains 'prashant')
+        n_alert = Notification(
+            device_id="dev_alert_01",
+            app_package="com.whatsapp",
+            app_name="WhatsApp",
+            title="Message from Prashant",
+            content="Hey are you available?",
+            received_at=now
+        )
+        # 2. Normal notification
+        n_normal = Notification(
+            device_id="dev_alert_01",
+            app_package="com.android.vending",
+            app_name="Play Store",
+            title="Update Complete",
+            content="App updated successfully",
+            received_at=now
+        )
+        # 3. Matching call (+919871920832 matches '9871920832')
+        c_alert = CallLog(
+            device_id="dev_alert_01",
+            phone_number="+919871920832",
+            contact_name="Doctor Clinic",
+            call_type="incoming",
+            duration_sec=30,
+            occurred_at=now
+        )
+        # 4. Matching SMS (body contains 'prashant')
+        s_alert = SmsMessage(
+            device_id="dev_alert_01",
+            address="+919800000000",
+            contact_name="Unknown",
+            body="Meeting with Prashant at 4pm",
+            sms_type="received",
+            occurred_at=now
+        )
+        db.session.add_all([n_alert, n_normal, c_alert, s_alert])
+        db.session.commit()
+
+    # Verify Notifications page has row-warning and ALERT badge
+    r = client.get('/dashboard/notifications')
+    assert r.status_code == 200
+    assert b'row-warning' in r.data
+    assert b'\xe2\x9a\xa0\xef\xb8\x8f ALERT' in r.data
+
+    # Verify Calls page has row-warning and ALERT badge
+    r = client.get('/dashboard/calls')
+    assert r.status_code == 200
+    assert b'row-warning' in r.data
+    assert b'\xe2\x9a\xa0\xef\xb8\x8f ALERT' in r.data
+
+    # Verify SMS page has row-warning and ALERT badge
+    r = client.get('/dashboard/sms')
+    assert r.status_code == 200
+    assert b'row-warning' in r.data
+    assert b'\xe2\x9a\xa0\xef\xb8\x8f ALERT' in r.data
+
+    # Verify Dashboard overview has row-warning
+    r = client.get('/dashboard')
+    assert r.status_code == 200
+    assert b'row-warning' in r.data
+
+    # Verify Search results have row-warning
+    r = client.get('/dashboard/search?q=Prashant')
+    assert r.status_code == 200
+    assert b'row-warning' in r.data
+
+

@@ -47,8 +47,11 @@
         </thead>
         <tbody>
             {% for m in messages %}
-            <tr>
-                <td class="time-text">{{ m.occurred_at|to_ist if m.occurred_at else '-' }}</td>
+            <tr {% if m|is_alert %}class="row-warning"{% endif %}>
+                <td class="time-text">
+                    {{ m.occurred_at|to_ist if m.occurred_at else '-' }}
+                    {% if m|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                </td>
                 <td>
                     {% if m.sms_type == 'received' %}
                     <span class="badge badge-green">Received</span>

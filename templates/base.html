@@ -316,6 +316,40 @@
             background-color: rgba(255,255,255,0.02);
         }
 
+        /* Discord Warning Alert Record Highlighting */
+        tr.row-warning, tr.row-warning td {
+            background-color: rgba(237, 66, 69, 0.18) !important;
+            border-bottom-color: rgba(237, 66, 69, 0.35) !important;
+        }
+
+        tr.row-warning:hover, tr.row-warning:hover td {
+            background-color: rgba(237, 66, 69, 0.28) !important;
+        }
+
+        tr.row-warning td:first-child {
+            border-left: 4px solid #ed4245 !important;
+        }
+
+        tr.row-warning .time-text {
+            color: #ff7b72 !important;
+            font-weight: 600;
+        }
+
+        .badge-alert {
+            background-color: rgba(237, 66, 69, 0.28);
+            color: #ff7b72;
+            border: 1px solid rgba(237, 66, 69, 0.6);
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            padding: 2px 7px;
+            border-radius: 12px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
         /* Badges & Tags */
         .badge {
             display: inline-flex;

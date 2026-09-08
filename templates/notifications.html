@@ -47,8 +47,11 @@
         </thead>
         <tbody>
             {% for n in notifications %}
-            <tr>
-                <td class="time-text">{{ n.received_at|to_ist if n.received_at else '-' }}</td>
+            <tr {% if n|is_alert %}class="row-warning"{% endif %}>
+                <td class="time-text">
+                    {{ n.received_at|to_ist if n.received_at else '-' }}
+                    {% if n|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                </td>
                 <td>
 
                     <strong>{{ n.app_name or n.app_package }}</strong>

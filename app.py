@@ -84,6 +84,40 @@ def highlight_filter(text, query):
         return Markup(escaped_text)
 
 
+@app.template_filter('is_alert')
+@app.template_global('is_alert')
+def is_alert_filter(record):
+    """Check if a record (Notification, CallLog, SmsMessage, CdrCall, CdrSms, or dict) matches IMPORTANT_KEYWORDS."""
+    if not record:
+        return False
+    # If Notification object
+    if hasattr(record, 'app_package'):
+        parts = [getattr(record, 'app_name', None), record.app_package, getattr(record, 'title', None), getattr(record, 'content', None)]
+        return is_important_content(' '.join(p for p in parts if p))
+    # If CallLog object
+    if hasattr(record, 'call_type'):
+        parts = [getattr(record, 'phone_number', None), getattr(record, 'contact_name', None)]
+        return is_important_content(' '.join(p for p in parts if p))
+    # If SmsMessage object
+    if hasattr(record, 'body'):
+        parts = [getattr(record, 'address', None), getattr(record, 'contact_name', None), getattr(record, 'body', None)]
+        return is_important_content(' '.join(p for p in parts if p))
+    # If CdrCall or CdrSms object
+    if hasattr(record, 'destination_number'):
+        parts = [getattr(record, 'destination_number', None), getattr(record, 'source_subscriber', None)]
+        return is_important_content(' '.join(p for p in parts if p))
+    # If dict (e.g. from search)
+    if isinstance(record, dict):
+        parts = [
+            record.get('app_name'), record.get('app_package'), record.get('title'), record.get('content'),
+            record.get('phone_number'), record.get('contact_name'),
+            record.get('address'), record.get('body'),
+            record.get('destination_number'), record.get('source_subscriber')
+        ]
+        return is_important_content(' '.join(str(p) for p in parts if p))
+    return is_important_content(str(record))
+
+
 @app.before_request
 def handle_device_selection():
     if 'device' in request.args:

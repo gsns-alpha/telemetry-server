@@ -673,11 +673,12 @@
             <tbody>
                 {% if calls_pagination and calls_pagination.items %}
                     {% for call, bill_period, filename in calls_pagination.items %}
-                    <tr>
+                    <tr {% if call|is_alert %}class="row-warning"{% endif %}>
                         <td style="color: #64748b; font-family: monospace;">{{ call.serial_no or loop.index }}</td>
                         <td style="font-weight: 500;">
                             <div>{{ call.occurred_at|to_ist_short }}</div>
                             <small style="color: #64748b; font-family: monospace;">{{ call.call_date_str }} {{ call.call_time_str }}</small>
+                            {% if call|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
                         </td>
                         <td>
                             <a href="{{ url_for('dashboard_cdr', tab='calls', q=call.destination_number) }}" class="phone-number-badge" title="Filter this number">
@@ -793,11 +794,12 @@
             <tbody>
                 {% if sms_pagination and sms_pagination.items %}
                     {% for sms_msg, bill_period, filename in sms_pagination.items %}
-                    <tr>
+                    <tr {% if sms_msg|is_alert %}class="row-warning"{% endif %}>
                         <td style="color: #64748b; font-family: monospace;">{{ sms_msg.serial_no or loop.index }}</td>
                         <td style="font-weight: 500;">
                             <div>{{ sms_msg.occurred_at|to_ist_short }}</div>
                             <small style="color: #64748b; font-family: monospace;">{{ sms_msg.sms_date_str }} {{ sms_msg.sms_time_str }}</small>
+                            {% if sms_msg|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
                         </td>
                         <td>
                             <a href="{{ url_for('dashboard_cdr', tab='sms', q=sms_msg.destination_number) }}" class="phone-number-badge" title="Filter this number/shortcode">

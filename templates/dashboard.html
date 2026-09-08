@@ -177,7 +177,7 @@
             </thead>
             <tbody>
                 {% for n in recent_notifications %}
-                <tr>
+                <tr {% if n|is_alert %}class="row-warning"{% endif %}>
                     <td>
                         <strong>{{ n.app_name or n.app_package }}</strong>
                         <div style="font-size: 11px; color: var(--text-secondary);"><code>{{ n.app_package }}</code></div>
@@ -186,7 +186,10 @@
                         <strong style="color: var(--text-primary);">{{ n.title or '—' }}</strong>
                         <div style="color: var(--text-secondary); font-size: 12px; margin-top: 2px;">{{ n.content|truncate(50) if n.content else '—' }}</div>
                     </td>
-                    <td class="time-text">{{ n.received_at|to_ist_short if n.received_at else '-' }}</td>
+                    <td class="time-text">
+                        {{ n.received_at|to_ist_short if n.received_at else '-' }}
+                        {% if n|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -218,7 +221,7 @@
             </thead>
             <tbody>
                 {% for c in recent_calls %}
-                <tr>
+                <tr {% if c|is_alert %}class="row-warning"{% endif %}>
                     <td>
                         <span class="badge {% if c.call_type == 'incoming' %}badge-green{% elif c.call_type == 'outgoing' %}badge-blue{% else %}badge-red{% endif %}">
                             Call ({{ c.call_type }})
@@ -226,11 +229,14 @@
                     </td>
                     <td><strong>{{ c.contact_name or c.phone_number }}</strong></td>
                     <td style="color: var(--text-secondary); font-size: 12px;">{{ c.duration_sec }}s duration</td>
-                    <td class="time-text">{{ c.occurred_at|to_ist_short if c.occurred_at else '-' }}</td>
+                    <td class="time-text">
+                        {{ c.occurred_at|to_ist_short if c.occurred_at else '-' }}
+                        {% if c|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
                 {% for s in recent_sms %}
-                <tr>
+                <tr {% if s|is_alert %}class="row-warning"{% endif %}>
                     <td>
                         <span class="badge {% if s.sms_type == 'received' %}badge-green{% else %}badge-blue{% endif %}">
                             SMS ({{ s.sms_type }})
@@ -238,7 +244,10 @@
                     </td>
                     <td><strong>{{ s.contact_name or s.address }}</strong></td>
                     <td style="color: var(--text-secondary); font-size: 12px;">{{ s.body|truncate(40) if s.body else '-' }}</td>
-                    <td class="time-text">{{ s.occurred_at|to_ist_short if s.occurred_at else '-' }}</td>
+                    <td class="time-text">
+                        {{ s.occurred_at|to_ist_short if s.occurred_at else '-' }}
+                        {% if s|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>

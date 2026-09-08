@@ -377,8 +377,11 @@
             </thead>
             <tbody>
                 {% for c in search_data.records.calls %}
-                <tr>
-                    <td class="time-text">{{ c.occurred_at|to_ist if c.occurred_at else '-' }}</td>
+                <tr {% if c|is_alert %}class="row-warning"{% endif %}>
+                    <td class="time-text">
+                        {{ c.occurred_at|to_ist if c.occurred_at else '-' }}
+                        {% if c|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                    </td>
                     <td>
                         <span class="node-pill">🖥️ {{ device_map.get(c.device_id, c.device_id|truncate(10)) }}</span>
                     </td>
@@ -452,8 +455,11 @@
             </thead>
             <tbody>
                 {% for s in search_data.records.sms %}
-                <tr>
-                    <td class="time-text">{{ s.occurred_at|to_ist if s.occurred_at else '-' }}</td>
+                <tr {% if s|is_alert %}class="row-warning"{% endif %}>
+                    <td class="time-text">
+                        {{ s.occurred_at|to_ist if s.occurred_at else '-' }}
+                        {% if s|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                    </td>
                     <td>
                         <span class="node-pill">🖥️ {{ device_map.get(s.device_id, s.device_id|truncate(10)) }}</span>
                     </td>
@@ -515,8 +521,11 @@
             </thead>
             <tbody>
                 {% for n in search_data.records.notifications %}
-                <tr>
-                    <td class="time-text">{{ n.received_at|to_ist if n.received_at else '-' }}</td>
+                <tr {% if n|is_alert %}class="row-warning"{% endif %}>
+                    <td class="time-text">
+                        {{ n.received_at|to_ist if n.received_at else '-' }}
+                        {% if n|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                    </td>
                     <td>
                         <span class="node-pill">🖥️ {{ device_map.get(n.device_id, n.device_id|truncate(10)) }}</span>
                     </td>
@@ -686,8 +695,11 @@
             </thead>
             <tbody>
                 {% for call, bill_period, filename in search_data.records.cdr_calls %}
-                <tr>
-                    <td class="time-text">{{ call.occurred_at|to_ist_short }}</td>
+                <tr {% if call|is_alert %}class="row-warning"{% endif %}>
+                    <td class="time-text">
+                        {{ call.occurred_at|to_ist_short }}
+                        {% if call|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                    </td>
                     <td><span class="node-pill">📱 {{ call.source_subscriber|highlight(query) }}</span></td>
                     <td>
                         <a href="{{ url_for('dashboard_cdr', tab='calls', q=call.destination_number) }}" style="font-family: monospace; font-weight: 700; color: #38bdf8; text-decoration: none;">
@@ -750,8 +762,11 @@
             </thead>
             <tbody>
                 {% for sms_msg, bill_period, filename in search_data.records.cdr_sms %}
-                <tr>
-                    <td class="time-text">{{ sms_msg.occurred_at|to_ist_short }}</td>
+                <tr {% if sms_msg|is_alert %}class="row-warning"{% endif %}>
+                    <td class="time-text">
+                        {{ sms_msg.occurred_at|to_ist_short }}
+                        {% if sms_msg|is_alert %}<div style="margin-top: 4px;"><span class="badge badge-alert">⚠️ ALERT</span></div>{% endif %}
+                    </td>
                     <td><span class="node-pill">📱 {{ sms_msg.source_subscriber|highlight(query) }}</span></td>
                     <td>
                         <a href="{{ url_for('dashboard_cdr', tab='sms', q=sms_msg.destination_number) }}" style="font-family: monospace; font-weight: 700; color: #fbbf24; text-decoration: none;">
