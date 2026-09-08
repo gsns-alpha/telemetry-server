@@ -297,7 +297,7 @@ def test_discord_important_highlighting(monkeypatch):
 
     sent_payloads = []
 
-    def mock_send(payload):
+    def mock_send(payload, is_alert=False):
         sent_payloads.append(payload)
 
     monkeypatch.setattr('app._send_discord', mock_send)
@@ -315,11 +315,16 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
+    assert '@here' in sent_payloads[0].get('content', '')
+    assert 'prashant' in sent_payloads[0].get('content', '')
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '!M'
-    assert '⚠️' in embed['description']
+    assert '🚨 ALERT: Notification Matched' in embed['title']
+    assert 'prashant' in embed['title']
     assert embed['color'] == 0xED4245
-    assert 'footer' not in embed
+    fields = {f['name']: f['value'] for f in embed.get('fields', [])}
+    assert 'Matched Keyword' in fields
+    assert '`prashant`' == fields['Matched Keyword']
+    assert 'WhatsApp' in fields['App']
 
     # 2. Important Call Log test with keyword '9871920832'
     sent_payloads.clear()
@@ -333,10 +338,15 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
+    assert '@here' in sent_payloads[0].get('content', '')
+    assert '9871920832' in sent_payloads[0].get('content', '')
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '!T'
-    assert '⚠️' in embed['description']
+    assert '🚨 ALERT: Call Matched' in embed['title']
+    assert '9871920832' in embed['title']
     assert embed['color'] == 0xED4245
+    fields = {f['name']: f['value'] for f in embed.get('fields', [])}
+    assert '`9871920832`' == fields['Matched Keyword']
+    assert '+919871920832' in fields['Number']
 
     # 3. Important SMS test with keyword 'prashant'
     sent_payloads.clear()
@@ -350,10 +360,15 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
+    assert '@here' in sent_payloads[0].get('content', '')
+    assert 'prashant' in sent_payloads[0].get('content', '')
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '!S'
-    assert '⚠️' in embed['description']
+    assert '🚨 ALERT: SMS Matched' in embed['title']
+    assert 'prashant' in embed['title']
     assert embed['color'] == 0xED4245
+    fields = {f['name']: f['value'] for f in embed.get('fields', [])}
+    assert '`prashant`' == fields['Matched Keyword']
+    assert '9999999999' in fields['Number']
 
     # 4. Uppercase case-insensitivity test ('PRASHANT')
     sent_payloads.clear()
@@ -368,11 +383,11 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
+    assert '@here' in sent_payloads[0].get('content', '')
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '!M'
-    assert '⚠️' in embed['description']
+    assert '🚨 ALERT: Notification Matched' in embed['title']
+    assert 'prashant' in embed['title']
     assert embed['color'] == 0xED4245
-    assert 'footer' not in embed
 
     # 5. Formatted phone number test ('+91-98719-20832')
     sent_payloads.clear()
@@ -386,9 +401,10 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
+    assert '@here' in sent_payloads[0].get('content', '')
     embed = sent_payloads[0]['embeds'][0]
-    assert embed['title'] == '!T'
-    assert '⚠️' in embed['description']
+    assert '🚨 ALERT: Call Matched' in embed['title']
+    assert '9871920832' in embed['title']
     assert embed['color'] == 0xED4245
 
     # 6. Regular notification (no keyword match) -> standard M (no brackets, no footer)
@@ -404,11 +420,11 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
+    assert 'content' not in sent_payloads[0]
     embed = sent_payloads[0]['embeds'][0]
     assert embed['title'] == 'M'
     assert '⚠️' not in embed['description']
     assert embed['color'] == 0x5865F2
-    assert 'footer' not in embed
 
     # 7. Regular call (no keyword match) -> standard T
     sent_payloads.clear()
@@ -422,6 +438,7 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
+    assert 'content' not in sent_payloads[0]
     embed = sent_payloads[0]['embeds'][0]
     assert embed['title'] == 'T'
     assert '⚠️' not in embed['description']
@@ -439,6 +456,7 @@ def test_discord_important_highlighting(monkeypatch):
     ], 'device_test_123456')
 
     assert len(sent_payloads) == 1
+    assert 'content' not in sent_payloads[0]
     embed = sent_payloads[0]['embeds'][0]
     assert embed['title'] == 'S'
     assert '⚠️' not in embed['description']
@@ -490,4 +508,54 @@ def test_fcm_wake_payload_includes_notification(monkeypatch):
     # Must still include data payload with wake type
     assert msg['data']['type'] == 'wake'
     assert msg['data']['device_id'] == 'test-device-123'
+
+
+def test_get_matched_alert_keyword():
+    from app import get_matched_alert_keyword, is_important_content
+
+    # Name matching (case-insensitive)
+    assert get_matched_alert_keyword("Hello Prashant") == "prashant"
+    assert get_matched_alert_keyword("prashant kumar") == "prashant"
+    assert get_matched_alert_keyword("URGENT: PRASHANT CALLED") == "prashant"
+    assert is_important_content("PRASHANT") is True
+
+    # Phone number matching (various formats)
+    assert get_matched_alert_keyword("+919871920832") == "9871920832"
+    assert get_matched_alert_keyword("9871920832") == "9871920832"
+    assert get_matched_alert_keyword("+91 98719 20832") == "9871920832"
+    assert get_matched_alert_keyword("+91-98719-20832") == "9871920832"
+    assert get_matched_alert_keyword("Call from (987) 192-0832") == "9871920832"
+    assert is_important_content("+919871920832") is True
+
+    # Non-matching cases
+    assert get_matched_alert_keyword("Random text message") is None
+    assert get_matched_alert_keyword("+919800000000") is None
+    assert get_matched_alert_keyword("") is None
+    assert get_matched_alert_keyword(None) is None
+    assert is_important_content("Random text") is False
+
+
+def test_discord_alert_webhook_routing(monkeypatch):
+    from app import _send_discord
+    import requests as _req
+
+    calls = []
+
+    def mock_post(url, json=None, timeout=None):
+        calls.append({'url': url, 'json': json})
+
+    monkeypatch.setattr(_req, 'post', mock_post)
+    monkeypatch.setattr('app.DISCORD_WEBHOOK_URL', 'https://discord.example.com/main')
+    monkeypatch.setattr('app.DISCORD_ALERT_WEBHOOK_URL', 'https://discord.example.com/alerts')
+
+    # Alert routing
+    _send_discord({'test': 'alert'}, is_alert=True)
+    assert len(calls) == 1
+    assert calls[0]['url'] == 'https://discord.example.com/alerts'
+
+    # Normal routing
+    _send_discord({'test': 'normal'}, is_alert=False)
+    assert len(calls) == 2
+    assert calls[1]['url'] == 'https://discord.example.com/main'
+
 
