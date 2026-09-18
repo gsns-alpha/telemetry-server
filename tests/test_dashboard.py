@@ -8,7 +8,7 @@ os.environ['DASHBOARD_USERNAME'] = 'admin'
 os.environ['DASHBOARD_PASSWORD'] = 'secretpass'
 os.environ['SECRET_KEY'] = 'test-secret'
 
-from app import app, db, Notification, CallLog, SmsMessage, Device, GpsLog, ConnectivityLog
+from app import app, db, Notification, CallLog, SmsMessage, Device, GpsLog, ConnectivityLog, ScreenLog
 
 
 @pytest.fixture
@@ -268,5 +268,28 @@ def test_alert_keyword_highlighting(client):
     r = client.get('/dashboard/search?q=Prashant')
     assert r.status_code == 200
     assert b'row-warning' in r.data
+
+
+def test_dashboard_screen_page(client):
+    client.post('/login', data={'username': 'admin', 'password': 'secretpass'})
+    now = datetime.now(timezone.utc)
+    with app.app_context():
+        device = Device(device_id="dev_scr_test", device_model="Pixel 8a", android_version="14", app_version="1.0.22", last_sync=now)
+        db.session.add(device)
+        db.session.add(ScreenLog(
+            device_id="dev_scr_test",
+            event_type="UNLOCKED",
+            is_interactive=True,
+            is_keyguard_locked=False,
+            occurred_at=now
+        ))
+        db.session.commit()
+
+    resp = client.get('/dashboard/screen')
+    assert resp.status_code == 200
+    assert b'Screen State &amp; Lock History (SCR)' in resp.data or b'Screen State & Lock History (SCR)' in resp.data
+    assert b'In Use' in resp.data
+    assert b'dev_scr_test' in resp.data
+
 
 

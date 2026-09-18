@@ -502,6 +502,12 @@
                     <span>Network (NET)</span>
                 </a>
             </li>
+            <li class="nav-item {% if request.path == '/dashboard/screen' %}active{% endif %}">
+                <a href="{{ url_for('dashboard_screen') }}">
+                    <span>📱</span>
+                    <span>Screen (SCR)</span>
+                </a>
+            </li>
             <li class="nav-item {% if request.path.startswith('/dashboard/cdr') %}active{% endif %}">
                 <a href="{{ url_for('dashboard_cdr') }}">
                     <span>📑</span>

@@ -9,7 +9,7 @@ os.environ['DASHBOARD_USERNAME'] = 'testuser'
 os.environ['DASHBOARD_PASSWORD'] = 'testpass'
 os.environ['SECRET_KEY'] = 'test-secret'
 
-from app import app, db, Device, Notification, CallLog, SmsMessage, ConnectivityLog
+from app import app, db, Device, Notification, CallLog, SmsMessage, ConnectivityLog, ScreenLog
 
 
 @pytest.fixture
@@ -743,6 +743,89 @@ def test_send_discord_for_connectivity_abbreviations(monkeypatch):
     assert embeds[2]['description'] == '123456 · OFFLINE · AP'
     assert embeds[3]['description'] == '123456 · OFFLINE · WD'
     assert embeds[4]['description'] == '123456 · OFFLINE · NL'
+
+
+def test_ping_with_screen_events(client):
+    payload = {
+        'device_id': 'test_dev_screen_01',
+        'device_model': 'Pixel 8',
+        'android_version': '14',
+        'battery_level': 85,
+        'screen_events': [
+            {
+                'local_id': 601,
+                'event_type': 'SCREEN_ON',
+                'is_interactive': True,
+                'is_keyguard_locked': True,
+                'occurred_at': 1726000000000
+            },
+            {
+                'local_id': 602,
+                'event_type': 'UNLOCKED',
+                'is_interactive': True,
+                'is_keyguard_locked': False,
+                'occurred_at': 1726000030000
+            }
+        ]
+    }
+    resp = client.post(
+        '/api/v1/ping',
+        headers={'X-API-Key': 'test-api-key'},
+        json=payload
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['status'] == 'ok'
+    assert 'received' in data
+    assert 601 in data['received']['screen_events']
+    assert 602 in data['received']['screen_events']
+
+    with app.app_context():
+        logs = ScreenLog.query.filter_by(device_id="test_dev_screen_01").order_by(ScreenLog.occurred_at.asc()).all()
+        assert len(logs) == 2
+        assert logs[0].event_type == "SCREEN_ON"
+        assert logs[1].event_type == "UNLOCKED"
+        assert logs[1].is_keyguard_locked is False
+
+        dev = db.session.get(Device, "test_dev_screen_01")
+        assert dev.last_screen_state == "UNLOCKED"
+
+
+def test_sync_with_screen_events(client):
+    payload = {
+        'device_id': 'test_dev_screen_02',
+        'device_model': 'Galaxy S24',
+        'android_version': '14',
+        'app_version': '1.0.22',
+        'notifications': [],
+        'call_logs': [],
+        'sms_messages': [],
+        'screen_events': [
+            {
+                'local_id': 701,
+                'event_type': 'LOCKED',
+                'is_interactive': False,
+                'is_keyguard_locked': True,
+                'occurred_at': 1726000100000
+            }
+        ]
+    }
+    resp = client.post(
+        '/api/v1/sync',
+        headers={'X-API-Key': 'test-api-key'},
+        json=payload
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['status'] == 'ok'
+    assert 701 in data['received']['screen_events']
+
+    with app.app_context():
+        logs = ScreenLog.query.filter_by(device_id="test_dev_screen_02").all()
+        assert len(logs) == 1
+        assert logs[0].event_type == "LOCKED"
+        assert logs[0].is_interactive is False
+
 
 
 

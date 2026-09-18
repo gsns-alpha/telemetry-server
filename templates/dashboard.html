@@ -58,6 +58,7 @@
                 <th>Power & Temp</th>
                 <th>Geo State</th>
                 <th>Net State</th>
+                <th>Screen / Lock</th>
                 <th>Last Health Ping</th>
                 <th>Last Sync</th>
                 <th>Status</th>
@@ -116,6 +117,21 @@
                         {% endif %}
                     {% else %}
                     <span style="color: var(--text-secondary); font-size: 11px;">-</span>
+                    {% endif %}
+                </td>
+
+                <td>
+                    {% if d.last_screen_state == 'UNLOCKED' %}
+                    <span class="badge badge-green" style="font-size: 11px;">📱 In Use</span>
+                    {% elif d.last_screen_state == 'LOCKED' %}
+                    <span class="badge" style="background: rgba(140, 149, 159, 0.15); color: #8b949e; border: 1px solid #30363d; font-size: 11px;">🔒 Locked</span>
+                    {% elif d.last_screen_state == 'SCREEN_ON' %}
+                    <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 11px;">👀 Screen On</span>
+                    {% else %}
+                    <span style="color: var(--text-secondary); font-size: 11px;">-</span>
+                    {% endif %}
+                    {% if d.last_screen_timestamp %}
+                    <div style="color: var(--text-secondary); font-size: 10px; margin-top: 3px; white-space: nowrap;">since {{ d.last_screen_timestamp|to_ist_short }}</div>
                     {% endif %}
                 </td>
 

