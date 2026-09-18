@@ -9,7 +9,7 @@ os.environ['DASHBOARD_USERNAME'] = 'testuser'
 os.environ['DASHBOARD_PASSWORD'] = 'testpass'
 os.environ['SECRET_KEY'] = 'test-secret'
 
-from app import app, db, Device, Notification, CallLog, SmsMessage
+from app import app, db, Device, Notification, CallLog, SmsMessage, ConnectivityLog
 
 
 @pytest.fixture
@@ -553,5 +553,197 @@ def test_discord_alert_webhook_routing(monkeypatch):
     _send_discord({'test': 'normal'}, is_alert=False)
     assert len(calls) == 2
     assert calls[1]['url'] == 'https://discord.example.com/main'
+
+
+def test_discord_rate_limit_429_retry(monkeypatch):
+    from app import _send_discord
+    import requests as _req
+
+    attempts = []
+
+    class MockResponse:
+        def __init__(self, status_code, json_data=None, headers=None):
+            self.status_code = status_code
+            self._json = json_data or {}
+            self.headers = headers or {}
+            self.text = "Rate limited" if status_code == 429 else "OK"
+
+        def json(self):
+            return self._json
+
+    def mock_post(url, json=None, timeout=None):
+        attempts.append({'url': url, 'json': json})
+        if len(attempts) == 1:
+            return MockResponse(429, json_data={'message': 'You are being rate limited.', 'retry_after': 0.01})
+        return MockResponse(204, headers={'X-RateLimit-Remaining': '25'})
+
+    monkeypatch.setattr(_req, 'post', mock_post)
+    monkeypatch.setattr('app.DISCORD_WEBHOOK_URL', 'https://discord.example.com/test')
+    monkeypatch.setattr('app.DISCORD_ALERT_WEBHOOK_URL', 'https://discord.example.com/test')
+
+    res = _send_discord({'test': 'rate_limit_payload'}, is_alert=False, max_retries=3)
+    assert res is True
+    assert len(attempts) == 2  # Retried and succeeded
+
+
+def test_discord_rate_limit_exhaustion(monkeypatch):
+    from app import _send_discord
+    import requests as _req
+
+    attempts = []
+
+    class MockResponse:
+        def __init__(self, status_code):
+            self.status_code = status_code
+            self.headers = {'Retry-After': '0.01'}
+            self.text = "Rate limited"
+
+        def json(self):
+            return {'retry_after': 0.01}
+
+    def mock_post(url, json=None, timeout=None):
+        attempts.append(url)
+        return MockResponse(429)
+
+    monkeypatch.setattr(_req, 'post', mock_post)
+    monkeypatch.setattr('app.DISCORD_WEBHOOK_URL', 'https://discord.example.com/test')
+    monkeypatch.setattr('app.DISCORD_ALERT_WEBHOOK_URL', 'https://discord.example.com/test')
+
+    res = _send_discord({'test': 'exhaust'}, is_alert=False, max_retries=3)
+    assert res is False
+    assert len(attempts) == 3
+
+
+def test_discord_embed_batching(monkeypatch):
+    from app import send_discord_for_notifications
+
+    sent_batches = []
+
+    def mock_send(payload, is_alert=False):
+        sent_batches.append(payload)
+
+    monkeypatch.setattr('app._send_discord', mock_send)
+
+    # Generate 15 notifications matching the 'prashant' alert keyword
+    notifs = [
+        {
+            'app_package': f'com.app.{i}',
+            'app_name': f'App {i}',
+            'title': f'Prashant message {i}',
+            'content': f'Hello from test {i}',
+            'received_at': f'2026-09-10 12:00:{i:02d}'
+        }
+        for i in range(15)
+    ]
+
+    send_discord_for_notifications(notifs, 'device_batch_test')
+
+    # Should be batched into 2 requests: one with 10 embeds, one with 5 embeds
+    assert len(sent_batches) == 2
+    assert len(sent_batches[0]['embeds']) == 10
+    assert len(sent_batches[1]['embeds']) == 5
+
+
+def test_discord_proactive_header_handling(monkeypatch):
+    from app import _send_discord, _discord_rate_reset
+    import requests as _req
+
+    class MockResponse:
+        def __init__(self):
+            self.status_code = 200
+            self.headers = {
+                'X-RateLimit-Remaining': '0',
+                'X-RateLimit-Reset-After': '0.5'
+            }
+            self.text = "OK"
+
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(_req, 'post', lambda u, json=None, timeout=None: MockResponse())
+    monkeypatch.setattr('app.DISCORD_WEBHOOK_URL', 'https://discord.example.com/header_test')
+
+    url = 'https://discord.example.com/header_test'
+    res = _send_discord({'test': 'headers'}, is_alert=False)
+    assert res is True
+    assert url in _discord_rate_reset
+    assert _discord_rate_reset[url] > 0
+
+
+def test_sync_connectivity_events(client):
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    payload = {
+        "device_id": "test_dev_conn_01",
+        "device_model": "Poco X6",
+        "android_version": "14",
+        "app_version": "1.0.18",
+        "connectivity_events": [
+            {
+                "local_id": 501,
+                "is_connected": False,
+                "event_type": "OFFLINE",
+                "reason": "AIRPLANE_MODE_ON",
+                "is_airplane_mode": True,
+                "is_wifi_enabled": False,
+                "is_mobile_data_enabled": False,
+                "occurred_at": now_ms
+            },
+            {
+                "local_id": 502,
+                "is_connected": True,
+                "event_type": "ONLINE",
+                "reason": "WIFI_CONNECTED",
+                "is_airplane_mode": False,
+                "is_wifi_enabled": True,
+                "is_mobile_data_enabled": True,
+                "occurred_at": now_ms + 1000
+            }
+        ]
+    }
+    resp = client.post(
+        '/api/v1/sync',
+        headers={'X-API-Key': 'test-api-key'},
+        json=payload
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['status'] == 'ok'
+    assert 501 in data['received']['connectivity_events']
+    assert 502 in data['received']['connectivity_events']
+
+    with app.app_context():
+        logs = ConnectivityLog.query.filter_by(device_id="test_dev_conn_01").order_by(ConnectivityLog.occurred_at.asc()).all()
+        assert len(logs) == 2
+        assert logs[0].reason == "AP"
+        assert logs[1].reason == "WC"
+
+        dev = db.session.get(Device, "test_dev_conn_01")
+        assert dev.last_connectivity_state == "ONLINE"
+        assert dev.last_connectivity_reason == "WC"
+
+
+def test_send_discord_for_connectivity_abbreviations(monkeypatch):
+    from app import send_discord_for_connectivity
+    sent_payloads = []
+    monkeypatch.setattr('app._send_discord', lambda p, is_alert=False: sent_payloads.append(p))
+
+    events = [
+        {'is_connected': True, 'reason': 'WIFI_CONNECTED'},
+        {'is_connected': True, 'reason': 'CELLULAR_CONNECTED'},
+        {'is_connected': False, 'reason': 'AIRPLANE_MODE_ON'},
+        {'is_connected': False, 'reason': 'WIFI_DISABLED'},
+        {'is_connected': False, 'reason': 'NETWORK_LOST'}
+    ]
+    send_discord_for_connectivity(events, 'device_test_abbr_123456')
+    assert len(sent_payloads) == 1
+    embeds = sent_payloads[0]['embeds']
+    assert len(embeds) == 5
+    assert embeds[0]['description'] == '123456 · ONLINE · WC'
+    assert embeds[1]['description'] == '123456 · ONLINE · CC'
+    assert embeds[2]['description'] == '123456 · OFFLINE · AP'
+    assert embeds[3]['description'] == '123456 · OFFLINE · WD'
+    assert embeds[4]['description'] == '123456 · OFFLINE · NL'
+
+
 
 

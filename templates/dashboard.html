@@ -57,6 +57,7 @@
                 <th>OS & Version</th>
                 <th>Power & Temp</th>
                 <th>Geo State</th>
+                <th>Net State</th>
                 <th>Last Health Ping</th>
                 <th>Last Sync</th>
                 <th>Status</th>
@@ -91,6 +92,28 @@
                     {% if d.gps_state_changed_at %}
                     <div style="color: var(--text-secondary); font-size: 10px; margin-top: 3px; white-space: nowrap;">since {{ d.gps_state_changed_at|to_ist_short }}</div>
                     {% endif %}
+                    {% else %}
+                    <span style="color: var(--text-secondary); font-size: 11px;">-</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if d.last_connectivity_state == 'ONLINE' %}
+                    <span class="badge badge-green" style="font-size: 11px;">🌐 Online</span>
+                    {% if d.last_connectivity_reason %}
+                    <div style="color: var(--text-secondary); font-size: 10px; margin-top: 3px; white-space: nowrap;">{{ d.last_connectivity_reason|abbr_reason }}</div>
+                    {% endif %}
+                    {% elif d.last_connectivity_state == 'OFFLINE' %}
+                        {% set abbr = d.last_connectivity_reason|abbr_reason %}
+                        {% if abbr in ('AP', 'AIRPLANE_MODE_ON') %}
+                        <span class="badge badge-red" style="font-size: 11px;">✈️ AP</span>
+                        {% elif abbr in ('WD', 'WIFI_DISABLED', 'MD', 'MOBILE_DATA_DISABLED', 'WMD', 'WIFI_AND_DATA_DISABLED') %}
+                        <span class="badge badge-red" style="font-size: 11px;">📴 {{ abbr }}</span>
+                        {% else %}
+                        <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 11px;">⚠️ {{ abbr }}</span>
+                        {% endif %}
+                        {% if d.last_connectivity_timestamp %}
+                        <div style="color: var(--text-secondary); font-size: 10px; margin-top: 3px; white-space: nowrap;">since {{ d.last_connectivity_timestamp|to_ist_short }}</div>
+                        {% endif %}
                     {% else %}
                     <span style="color: var(--text-secondary); font-size: 11px;">-</span>
                     {% endif %}

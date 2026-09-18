@@ -496,6 +496,12 @@
                     <span>Geo (LOC)</span>
                 </a>
             </li>
+            <li class="nav-item {% if request.path == '/dashboard/connectivity' %}active{% endif %}">
+                <a href="{{ url_for('dashboard_connectivity') }}">
+                    <span>🌐</span>
+                    <span>Network (NET)</span>
+                </a>
+            </li>
             <li class="nav-item {% if request.path.startswith('/dashboard/cdr') %}active{% endif %}">
                 <a href="{{ url_for('dashboard_cdr') }}">
                     <span>📑</span>

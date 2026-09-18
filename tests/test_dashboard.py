@@ -8,7 +8,7 @@ os.environ['DASHBOARD_USERNAME'] = 'admin'
 os.environ['DASHBOARD_PASSWORD'] = 'secretpass'
 os.environ['SECRET_KEY'] = 'test-secret'
 
-from app import app, db, Notification, CallLog, SmsMessage, Device, GpsLog
+from app import app, db, Notification, CallLog, SmsMessage, Device, GpsLog, ConnectivityLog
 
 
 @pytest.fixture
@@ -59,6 +59,16 @@ def test_dashboard_pages_render(client):
         db.session.add(Notification(device_id="dev_001", app_package="com.test", app_name="TestApp", title="TestTitle", content="TestContent", received_at=now))
         db.session.add(CallLog(device_id="dev_001", phone_number="12345", call_type="incoming", duration_sec=10, occurred_at=now))
         db.session.add(SmsMessage(device_id="dev_001", address="54321", body="Hello SMS", sms_type="received", occurred_at=now))
+        db.session.add(ConnectivityLog(
+            device_id="dev_001",
+            is_connected=False,
+            event_type="OFFLINE",
+            reason="AIRPLANE_MODE_ON",
+            is_airplane_mode=True,
+            is_wifi_enabled=False,
+            is_mobile_data_enabled=False,
+            occurred_at=now
+        ))
         db.session.commit()
 
     # Overview
@@ -80,6 +90,11 @@ def test_dashboard_pages_render(client):
     r = client.get('/dashboard/sms')
     assert r.status_code == 200
     assert b'Hello SMS' in r.data
+
+    # Connectivity
+    r = client.get('/dashboard/connectivity')
+    assert r.status_code == 200
+    assert b'Airplane Mode' in r.data
 
     # Search page without query
     r = client.get('/dashboard/search')

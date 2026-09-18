@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+
+{% block title %}Network (NET) — DevicePulse{% endblock %}
+
+{% block content %}
+<div class="header-bar">
+    <div>
+        <h1 class="page-title">Network State Timeline (NET)</h1>
+        <p class="page-subtitle">Chronological record of user network actions, airplane mode, and connectivity transitions</p>
+    </div>
+
+    <form method="GET" action="{{ url_for('dashboard_connectivity') }}" class="filter-group">
+        <select name="state" onchange="this.form.submit()">
+            <option value="">All States</option>
+            <option value="online" {% if current_state == 'online' %}selected{% endif %}>🟢 Online</option>
+            <option value="offline" {% if current_state == 'offline' %}selected{% endif %}>🔴 Offline</option>
+        </select>
+
+        <select name="reason" onchange="this.form.submit()">
+            <option value="">All Reasons</option>
+            <option value="AP" {% if current_reason in ('AIRPLANE_MODE_ON', 'AP') %}selected{% endif %}>✈️ Airplane Mode (AP)</option>
+            <option value="WD" {% if current_reason in ('WIFI_DISABLED', 'WD') %}selected{% endif %}>📴 Wi-Fi Off (WD)</option>
+            <option value="MD" {% if current_reason in ('MOBILE_DATA_DISABLED', 'MD') %}selected{% endif %}>📶 Mobile Data Off (MD)</option>
+            <option value="WMD" {% if current_reason in ('WIFI_AND_DATA_DISABLED', 'WMD') %}selected{% endif %}>📴 Both Wi-Fi & Data Off (WMD)</option>
+            <option value="NL" {% if current_reason in ('NETWORK_LOST', 'NL') %}selected{% endif %}>⚠️ Signal / Network Lost (NL)</option>
+            <option value="WC" {% if current_reason in ('WIFI_CONNECTED', 'WC') %}selected{% endif %}>📶 Wi-Fi Connected (WC)</option>
+            <option value="CC" {% if current_reason in ('CELLULAR_CONNECTED', 'CC') %}selected{% endif %}>📱 Cellular Connected (CC)</option>
+        </select>
+
+        <select name="device" onchange="this.form.submit()">
+            <option value="all">🖥️ All Nodes</option>
+            {% for d in global_devices %}
+            <option value="{{ d.device_id }}" {% if selected_device_id == d.device_id %}selected{% endif %}>
+                {{ d.device_model }} ({{ d.device_id|truncate(10) }})
+            </option>
+            {% endfor %}
+        </select>
+    </form>
+</div>
+
+<div class="card-box">
+    {% if connectivity_logs %}
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 200px;">Timestamp (IST)</th>
+                <th style="width: 180px;">Device Model</th>
+                <th style="width: 170px;">State</th>
+                <th style="width: 200px;">Radio Switches</th>
+                <th>Details & Root Cause</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log, model in connectivity_logs %}
+            <tr>
+                <td class="time-text">
+                    <strong style="color: var(--accent-cyan);">{{ log.occurred_at|to_ist }}</strong>
+                </td>
+                <td>
+                    <strong>{{ model or log.device_id }}</strong>
+                    <div style="font-size: 11px; color: var(--text-secondary);"><code>{{ log.device_id }}</code></div>
+                </td>
+                <td>
+                    {% if log.is_connected %}
+                        <span class="badge badge-green" style="font-size: 12px; padding: 4px 10px;">🟢 Online ({{ log.reason|abbr_reason }})</span>
+                    {% else %}
+                        {% set abbr = log.reason|abbr_reason %}
+                        {% if abbr in ('AP', 'AIRPLANE_MODE_ON') %}
+                            <span class="badge badge-red" style="font-size: 12px; padding: 4px 10px;">✈️ AP</span>
+                        {% elif abbr in ('WD', 'WIFI_DISABLED', 'MD', 'MOBILE_DATA_DISABLED', 'WMD', 'WIFI_AND_DATA_DISABLED') %}
+                            <span class="badge badge-red" style="font-size: 12px; padding: 4px 10px;">📴 {{ abbr }}</span>
+                        {% else %}
+                            <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 12px; padding: 4px 10px;">⚠️ {{ abbr }}</span>
+                        {% endif %}
+                    {% endif %}
+                </td>
+                <td>
+                    <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                        {% if log.is_airplane_mode %}
+                            <span class="badge badge-red" style="font-size: 10px; padding: 2px 6px;">✈️ Airplane ON</span>
+                        {% endif %}
+                        <span class="badge {{ 'badge-green' if log.is_wifi_enabled else 'badge-red' }}" style="font-size: 10px; padding: 2px 6px;">
+                            Wi-Fi {{ 'ON' if log.is_wifi_enabled else 'OFF' }}
+                        </span>
+                        <span class="badge {{ 'badge-green' if log.is_mobile_data_enabled else 'badge-red' }}" style="font-size: 10px; padding: 2px 6px;">
+                            Data {{ 'ON' if log.is_mobile_data_enabled else 'OFF' }}
+                        </span>
+                    </div>
+                </td>
+                <td style="color: var(--text-secondary); font-size: 13px;">
+                    <span class="badge" style="background: rgba(255, 255, 255, 0.07); font-size: 11px; margin-right: 6px; font-family: monospace; color: var(--accent-cyan);">{{ log.reason|abbr_reason }}</span>
+                    {% set abbr = log.reason|abbr_reason %}
+                    {% if abbr in ('AP', 'AIRPLANE_MODE_ON') %}
+                        <strong style="color: var(--accent-red);">User toggled Airplane Mode ON</strong> — All wireless transmissions cut.
+                    {% elif abbr in ('WD', 'WIFI_DISABLED') %}
+                        <strong style="color: var(--accent-red);">User turned Wi-Fi OFF</strong> — Wi-Fi radio switched off in quick settings.
+                    {% elif abbr in ('MD', 'MOBILE_DATA_DISABLED') %}
+                        <strong style="color: var(--accent-red);">User turned Mobile Data OFF</strong> — Cellular data disabled in settings.
+                    {% elif abbr in ('WMD', 'WIFI_AND_DATA_DISABLED') %}
+                        <strong style="color: var(--accent-red);">Both Wi-Fi & Mobile Data disabled</strong> by user.
+                    {% elif abbr in ('NL', 'NETWORK_LOST') %}
+                        <span style="color: #f59e0b;">Environmental / carrier signal loss</span> — Radios remained enabled.
+                    {% elif abbr in ('WC', 'WIFI_CONNECTED') %}
+                        <strong style="color: var(--accent-green);">Connected to Wi-Fi</strong> — Active internet established.
+                    {% elif abbr in ('CC', 'CELLULAR_CONNECTED') %}
+                        <strong style="color: var(--accent-green);">Connected to Cellular Network</strong> — Active 4G/5G internet established.
+                    {% else %}
+                        {{ log.reason }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if pagination and pagination.pages > 1 %}
+    <div class="pagination">
+        {% if pagination.has_prev %}
+        <a href="{{ url_for('dashboard_connectivity', page=pagination.prev_num, device=current_device, state=current_state, reason=current_reason) }}" class="btn">&larr; Previous</a>
+        {% endif %}
+        <span class="page-info">Page {{ pagination.page }} of {{ pagination.pages }}</span>
+        {% if pagination.has_next %}
+        <a href="{{ url_for('dashboard_connectivity', page=pagination.next_num, device=current_device, state=current_state, reason=current_reason) }}" class="btn">Next &rarr;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+        <p>No network state events recorded yet. When a monitored device disconnects, enables airplane mode, or switches connections, records will appear here chronologically.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
