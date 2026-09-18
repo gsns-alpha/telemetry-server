@@ -411,17 +411,182 @@
             stroke: var(--border-color);
         }
 
-        @media (max-width: 900px) {
-            .sidebar {
-                width: 70px;
-                padding: 16px 8px;
+        /* Mobile Navigation & Responsive Drawer */
+        .mobile-header {
+            display: none;
+        }
+
+        .sidebar-header-mobile {
+            display: none;
+        }
+
+        .sidebar-backdrop {
+            display: none;
+        }
+
+        .card-box {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                flex-direction: column;
+                min-width: 0;
             }
-            .brand-text, .nav-item a span, .logout-btn span {
+
+            .mobile-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                height: 56px;
+                padding: 0 16px;
+                background: rgba(17, 24, 39, 0.95);
+                backdrop-filter: blur(12px);
+                border-bottom: 1px solid var(--border-color);
+                position: sticky;
+                top: 0;
+                z-index: 150;
+                width: 100%;
+            }
+
+            .mobile-brand {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                text-decoration: none;
+                color: var(--text-primary);
+            }
+
+            .mobile-brand-title {
+                font-weight: 700;
+                font-size: 16px;
+                letter-spacing: -0.3px;
+            }
+
+            .mobile-menu-toggle {
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                color: var(--text-primary);
+                width: 38px;
+                height: 38px;
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                transition: all 0.15s ease;
+            }
+            .mobile-menu-toggle:hover {
+                border-color: var(--accent-primary);
+                color: var(--accent-primary);
+            }
+
+            .sidebar-backdrop {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.75);
+                backdrop-filter: blur(4px);
+                z-index: 199;
+            }
+            .sidebar-backdrop.active {
+                display: block;
+            }
+
+            .sidebar {
+                width: 280px;
+                position: fixed;
+                top: 0;
+                bottom: 0;
+                left: 0;
+                z-index: 200;
+                transform: translateX(-100%);
+                transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: 10px 0 35px rgba(0, 0, 0, 0.6);
+                overflow-y: auto;
+            }
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .sidebar-header-mobile {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding-bottom: 16px;
+                margin-bottom: 16px;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .sidebar-close-btn {
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                color: var(--text-secondary);
+                font-size: 22px;
+                line-height: 1;
+                width: 32px;
+                height: 32px;
+                border-radius: 6px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+            }
+            .sidebar-close-btn:hover {
+                color: var(--text-primary);
+                border-color: var(--accent-red);
+            }
+
+            .sidebar > .brand {
                 display: none;
             }
+
             .main-content {
-                margin-left: 70px;
-                padding: 20px;
+                margin-left: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                padding: 16px 12px !important;
+                min-width: 0;
+            }
+
+            .header-bar {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+                margin-bottom: 20px;
+            }
+
+            .page-title {
+                font-size: 20px;
+            }
+
+            .filter-group {
+                width: 100%;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }
+            .filter-group select, .filter-group input {
+                width: 100%;
+            }
+
+            .card-box {
+                padding: 16px 12px;
+                border-radius: 10px;
+            }
+
+            table {
+                min-width: 600px;
+            }
+
+            .grid-cards {
+                grid-template-columns: 1fr;
+                gap: 12px;
+                margin-bottom: 20px;
             }
         }
     </style>
@@ -429,8 +594,38 @@
 </head>
 <body>
 
+    <!-- Mobile Top Navigation Header -->
+    <header class="mobile-header">
+        <a href="{{ url_for('dashboard') }}" class="mobile-brand">
+            <div class="brand-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="2"></circle>
+                    <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"></path>
+                </svg>
+            </div>
+            <span class="mobile-brand-title">DevicePulse</span>
+        </a>
+        <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle Navigation">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+        </button>
+    </header>
+
+    <!-- Sidebar Backdrop for Mobile -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebarNav">
+        <div class="sidebar-header-mobile">
+            <div class="brand-text" style="display: block;">
+                <h2 style="font-size: 16px; font-weight: 700;">DevicePulse</h2>
+                <span style="font-size: 11px; color: var(--accent-primary); text-transform: uppercase;">Telemetry Console</span>
+            </div>
+            <button class="sidebar-close-btn" id="sidebarCloseBtn" aria-label="Close Navigation">&times;</button>
+        </div>
         <a href="{{ url_for('dashboard') }}" class="brand">
             <div class="brand-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -531,5 +726,37 @@
         {% block content %}{% endblock %}
     </main>
 
+    <script>
+        (function() {
+            const toggle = document.getElementById('mobileMenuToggle');
+            const sidebar = document.getElementById('sidebarNav');
+            const backdrop = document.getElementById('sidebarBackdrop');
+            const closeBtn = document.getElementById('sidebarCloseBtn');
+
+            function openSidebar() {
+                if (sidebar) sidebar.classList.add('open');
+                if (backdrop) backdrop.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+
+            function closeSidebar() {
+                if (sidebar) sidebar.classList.remove('open');
+                if (backdrop) backdrop.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+
+            if (toggle) toggle.addEventListener('click', openSidebar);
+            if (closeBtn) closeBtn.addEventListener('click', closeSidebar);
+            if (backdrop) backdrop.addEventListener('click', closeSidebar);
+
+            document.querySelectorAll('.nav-item a, .sidebar-footer a').forEach(link => {
+                link.addEventListener('click', () => {
+                    if (window.innerWidth <= 768) {
+                        closeSidebar();
+                    }
+                });
+            });
+        })();
+    </script>
 </body>
 </html>
