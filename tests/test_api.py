@@ -670,7 +670,8 @@ def test_discord_proactive_header_handling(monkeypatch):
     assert _discord_rate_reset[url] > 0
 
 
-def test_sync_connectivity_events(client):
+def test_sync_connectivity_events(client, monkeypatch):
+    monkeypatch.setattr('app._send_discord', lambda *args, **kwargs: True)
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     payload = {
         "device_id": "test_dev_conn_01",
@@ -782,13 +783,14 @@ def test_ping_with_screen_events(client):
 
     with app.app_context():
         logs = ScreenLog.query.filter_by(device_id="test_dev_screen_01").order_by(ScreenLog.occurred_at.asc()).all()
-        assert len(logs) == 2
-        assert logs[0].event_type == "SCREEN_ON"
-        assert logs[1].event_type == "UNLOCKED"
-        assert logs[1].is_keyguard_locked is False
+        # SCREEN_ON is ignored so only authentic UNLOCKED (in-use) event is stored
+        assert len(logs) == 1
+        assert logs[0].event_type == "UNLOCKED"
+        assert logs[0].is_keyguard_locked is False
 
         dev = db.session.get(Device, "test_dev_screen_01")
         assert dev.last_screen_state == "UNLOCKED"
+        assert dev.last_screen_timestamp is not None
 
 
 def test_sync_with_screen_events(client):

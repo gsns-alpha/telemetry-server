@@ -6,7 +6,7 @@
 <div class="header-bar">
     <div>
         <h1 class="page-title">Screen State & Lock History (SCR)</h1>
-        <p class="page-subtitle">Chronological record of device lock, unlock, and screen awake sessions per device</p>
+        <p class="page-subtitle">Chronological record of active device usage sessions (unlocked & in use vs locked / idle)</p>
     </div>
 
     <form method="GET" action="{{ url_for('dashboard_screen') }}" class="filter-group">
@@ -14,7 +14,6 @@
             <option value="">All States</option>
             <option value="UNLOCKED" {% if current_state == 'UNLOCKED' %}selected{% endif %}>🟢 In Use (UNLOCKED)</option>
             <option value="LOCKED" {% if current_state == 'LOCKED' %}selected{% endif %}>🔒 Locked (LOCKED)</option>
-            <option value="SCREEN_ON" {% if current_state == 'SCREEN_ON' %}selected{% endif %}>🟡 Screen On (SCREEN_ON)</option>
         </select>
 
         <select name="device" onchange="this.form.submit()">
@@ -55,8 +54,6 @@
                         <span class="badge badge-green" style="font-size: 12px; padding: 4px 10px;">📱 In Use</span>
                     {% elif log.event_type == 'LOCKED' %}
                         <span class="badge" style="background: rgba(140, 149, 159, 0.15); color: #8b949e; border: 1px solid #30363d; font-size: 12px; padding: 4px 10px;">🔒 Locked</span>
-                    {% elif log.event_type == 'SCREEN_ON' %}
-                        <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 12px; padding: 4px 10px;">👀 Screen On</span>
                     {% else %}
                         <span class="badge" style="font-size: 12px; padding: 4px 10px;">{{ log.event_type }}</span>
                     {% endif %}
@@ -73,11 +70,9 @@
                 </td>
                 <td style="color: var(--text-secondary); font-size: 13px;">
                     {% if log.event_type == 'UNLOCKED' %}
-                        <strong style="color: var(--accent-green);">Device Unlocked & Active</strong> — User authenticated and actively interacting with device.
+                        <strong style="color: var(--accent-green);">Device In Use & Active</strong> — User authenticated and actively interacting with device.
                     {% elif log.event_type == 'LOCKED' %}
-                        <span style="color: var(--text-secondary);">Device Locked & Sleeping</span> — Display turned off; device in standby/pocket.
-                    {% elif log.event_type == 'SCREEN_ON' %}
-                        <span style="color: #f59e0b;">Display Woke Up</span> — Lockscreen glance or notification wake; keyguard remains locked.
+                        <span style="color: var(--text-secondary);">Device Locked & Idle</span> — Display turned off / device locked in standby or pocket.
                     {% else %}
                         State transition: {{ log.event_type }}
                     {% endif %}
@@ -101,7 +96,7 @@
 
     {% else %}
     <div class="empty-state">
-        <p>No screen state events recorded yet. When a monitored device is unlocked, locked, or wakes up, records will appear here chronologically.</p>
+        <p>No device usage events recorded yet. When a monitored device is unlocked (in use) or locked, records will appear here chronologically.</p>
     </div>
     {% endif %}
 </div>

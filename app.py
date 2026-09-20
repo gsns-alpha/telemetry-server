@@ -49,6 +49,19 @@ def format_duration_filter(sec):
     s = sec % 60
     return f"{m:02d}:{s:02d}"
 
+def to_naive_utc(dt):
+    """Normalize datetime or timestamp to offset-naive UTC datetime for consistent database comparisons."""
+    if dt is None:
+        return None
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except Exception:
+            return None
+    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
 @app.template_filter('to_ist')
 def to_ist_filter(dt, format='%Y-%m-%d %I:%M:%S %p'):
     if not dt:
@@ -1195,8 +1208,15 @@ def device_ping():
             try:
                 local_id = s.get('local_id')
                 raw_ts = s.get('occurred_at', 0)
-                occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
+                occurred_at = to_naive_utc(datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now)
                 event_type = s.get('event_type', 'UNLOCKED')
+
+                # User requested only to capture in-use vs locked; discard screen wakeup (SCREEN_ON) noise
+                if event_type == 'SCREEN_ON':
+                    if local_id is not None:
+                        received_screen_events.append(local_id)
+                    continue
+
                 is_interactive = bool(s.get('is_interactive', True))
                 is_keyguard_locked = bool(s.get('is_keyguard_locked', False))
 
@@ -1214,23 +1234,27 @@ def device_ping():
                         is_interactive=is_interactive,
                         is_keyguard_locked=is_keyguard_locked,
                         occurred_at=occurred_at,
-                        synced_at=now
+                        synced_at=to_naive_utc(now)
                     )
                     db.session.add(screen_entry)
 
                 if local_id is not None:
                     received_screen_events.append(local_id)
 
-                if not device.last_screen_timestamp or occurred_at >= device.last_screen_timestamp:
+                dev_screen_ts = to_naive_utc(device.last_screen_timestamp)
+                if not dev_screen_ts or occurred_at >= dev_screen_ts:
                     device.last_screen_state = event_type
                     device.last_screen_timestamp = occurred_at
             except Exception as e:
                 app.logger.error(f"Error parsing Screen item in ping: {e}")
 
     if 'screen_state' in data and data['screen_state']:
-        device.last_screen_state = data['screen_state']
-        if not device.last_screen_timestamp:
-            device.last_screen_timestamp = now
+        incoming_state = data['screen_state']
+        if incoming_state in ['UNLOCKED', 'LOCKED']:
+            dev_screen_ts = to_naive_utc(device.last_screen_timestamp)
+            if device.last_screen_state != incoming_state or not dev_screen_ts:
+                device.last_screen_state = incoming_state
+                device.last_screen_timestamp = to_naive_utc(now)
 
     db.session.commit()
 
@@ -1503,10 +1527,12 @@ def sync_data():
                 received_connectivity_ids.append(local_id)
 
             # Update latest device state if this event is newest
-            if not device.last_connectivity_timestamp or occurred_at >= device.last_connectivity_timestamp:
+            dev_conn_ts = to_naive_utc(device.last_connectivity_timestamp)
+            occ_conn_ts = to_naive_utc(occurred_at)
+            if not dev_conn_ts or occ_conn_ts >= dev_conn_ts:
                 device.last_connectivity_state = event_type
                 device.last_connectivity_reason = reason
-                device.last_connectivity_timestamp = occurred_at
+                device.last_connectivity_timestamp = occ_conn_ts
         except Exception as e:
             app.logger.error(f"Error parsing Connectivity item: {e}")
 
@@ -1515,8 +1541,15 @@ def sync_data():
         try:
             local_id = s.get('local_id')
             raw_ts = s.get('occurred_at', 0)
-            occurred_at = datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now
+            occurred_at = to_naive_utc(datetime.fromtimestamp(raw_ts / 1000.0, tz=timezone.utc) if raw_ts > 0 else now)
             event_type = s.get('event_type', 'UNLOCKED')
+
+            # User requested only to capture in-use vs locked; discard screen wakeup (SCREEN_ON) noise
+            if event_type == 'SCREEN_ON':
+                if local_id is not None:
+                    received_screen_ids.append(local_id)
+                continue
+
             is_interactive = bool(s.get('is_interactive', True))
             is_keyguard_locked = bool(s.get('is_keyguard_locked', False))
 
@@ -1534,14 +1567,15 @@ def sync_data():
                     is_interactive=is_interactive,
                     is_keyguard_locked=is_keyguard_locked,
                     occurred_at=occurred_at,
-                    synced_at=now
+                    synced_at=to_naive_utc(now)
                 )
                 db.session.add(screen_entry)
 
             if local_id is not None:
                 received_screen_ids.append(local_id)
 
-            if not device.last_screen_timestamp or occurred_at >= device.last_screen_timestamp:
+            dev_screen_ts = to_naive_utc(device.last_screen_timestamp)
+            if not dev_screen_ts or occurred_at >= dev_screen_ts:
                 device.last_screen_state = event_type
                 device.last_screen_timestamp = occurred_at
         except Exception as e:
@@ -1811,8 +1845,10 @@ def dashboard_screen():
 
     if device_filter:
         query = query.filter(ScreenLog.device_id == device_filter)
-    if state_filter in ['UNLOCKED', 'LOCKED', 'SCREEN_ON']:
+    if state_filter in ['UNLOCKED', 'LOCKED']:
         query = query.filter(ScreenLog.event_type == state_filter)
+    else:
+        query = query.filter(ScreenLog.event_type.in_(['UNLOCKED', 'LOCKED']))
 
     pagination = query.order_by(ScreenLog.occurred_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
     devices = Device.query.order_by(Device.last_ping.desc().nullslast()).all()
